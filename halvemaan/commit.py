@@ -20,7 +20,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import user, base, repository, pull_request, pull_request_review, pull_request_review_comment, author
+from halvemaan import user, base, repository, pull_request, pull_request_review, pull_request_review_comment, actor
 
 luigi.auto_namespace(scope=__name__)
 
@@ -74,11 +74,11 @@ class Commit:
         self.object_type: base.ObjectType = base.ObjectType.COMMIT
         self.id: str = commit_id
         self.repository_id: str = None
-        self.author: author.Author = author.Author('', author.AuthorType.UNKNOWN)
+        self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.authored_by_committer: bool = False
         self.total_authors: int = 0
-        self.authors: [author.Author] = []
-        self.committer: [author.Author] = author.Author('', author.AuthorType.UNKNOWN)
+        self.authors: [actor.Actor] = []
+        self.committer: [actor.Actor] = actor.Actor('', actor.ActorType.UNKNOWN)
         # mapped to onBehalfOf
         self.for_organization_id: str = None
         # for when the code was committed
@@ -143,7 +143,7 @@ class Commit:
         }
 
 
-class GitCommitsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, metaclass=abc.ABCMeta):
+class GitSingleCommitsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, metaclass=abc.ABCMeta):
     """
     Task for loading commits
     """
@@ -185,12 +185,12 @@ class GitCommitsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, 
         commit.repository_id = self.repository.id
         if node["author"] is not None:
             if node["author"]["user"] is not None:
-                commit.author = self._find_author_by_id(node["author"]["user"]["id"])
+                commit.author = self._find_actor_by_id(node["author"]["user"]["id"])
         commit.authored_by_committer = node["authoredByCommitter"]
         commit.total_authors = node["authors"]["totalCount"]
         if node["committer"] is not None:
             if node["committer"]["user"] is not None:
-                commit.committer = self._find_author_by_id(node["committer"]["user"]["id"])
+                commit.committer = self._find_actor_by_id(node["committer"]["user"]["id"])
         if node["onBehalfOf"] is not None:
             commit.for_organization_id = node["onBehalfOf"]["id"]
         commit.create_datetime = base.to_datetime_from_str(node["committedDate"])
@@ -360,7 +360,7 @@ class GitCommitsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, 
         return query
 
 
-class LoadCommitsTask(GitCommitsTask):
+class LoadCommitsTask(GitSingleCommitsTask):
     """
     Task for loading commits from pull requests
     """
@@ -370,7 +370,7 @@ class LoadCommitsTask(GitCommitsTask):
         self.object_type = base.ObjectType.PULL_REQUEST
 
     def requires(self):
-        return [pull_request.LoadCommitIdsTask(owner=self.owner, name=self.name)]
+        return [pull_request.LoadCommitIdsTaskSingle(owner=self.owner, name=self.name)]
 
     def _find_unsaved_commits(self) -> [str]:
         """
@@ -383,7 +383,7 @@ class LoadCommitsTask(GitCommitsTask):
         luigi.run()
 
 
-class LoadReviewCommitsTask(GitCommitsTask):
+class LoadReviewCommitsTask(GitSingleCommitsTask):
     """
     Task for loading commits from pull requests
     """
@@ -393,7 +393,7 @@ class LoadReviewCommitsTask(GitCommitsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW
 
     def requires(self):
-        return [pull_request_review.LoadReviewsTask(owner=self.owner, name=self.name)]
+        return [pull_request_review.LoadReviewsTaskSingle(owner=self.owner, name=self.name)]
 
     def _find_unsaved_commits(self) -> [str]:
         """
@@ -406,7 +406,7 @@ class LoadReviewCommitsTask(GitCommitsTask):
         luigi.run()
 
 
-class LoadReviewCommentCommitsTask(GitCommitsTask):
+class LoadReviewCommentCommitsTask(GitSingleCommitsTask):
     """
     Task for loading commits from pull request review comments
     """
@@ -416,7 +416,7 @@ class LoadReviewCommentCommitsTask(GitCommitsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW_COMMENT
 
     def requires(self):
-        return [pull_request_review_comment.LoadReviewCommentsTask(owner=self.owner, name=self.name)]
+        return [pull_request_review_comment.LoadReviewCommentsTaskSingle(owner=self.owner, name=self.name)]
 
     def _find_unsaved_commits(self) -> [str]:
         """
@@ -429,8 +429,8 @@ class LoadReviewCommentCommitsTask(GitCommitsTask):
         luigi.run()
 
 
-class LoadCommitPullRequestIdsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, 
-                                   repository.GitRepositoryCountMixin):
+class LoadCommitPullRequestIdsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                         repository.GitRepositoryCountMixin):
     """
     Task for loading pull request ids for saved commits
     """
@@ -544,8 +544,8 @@ class LoadCommitPullRequestIdsTask(repository.GitRepositoryTask, author.GitAutho
         luigi.run()
 
 
-class LoadCommitAuthorIdsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, 
-                              repository.GitRepositoryCountMixin):
+class LoadCommitActorIdsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                   repository.GitRepositoryCountMixin):
     """
     Task for loading author ids for saved commits
     """
@@ -569,7 +569,7 @@ class LoadCommitAuthorIdsTask(repository.GitRepositoryTask, author.GitAuthorLook
         for commit in commits:
             commit_id: str = commit['id']
             authors_expected: int = commit['total_authors']
-            authors: [author.Author] = []
+            authors: [actor.Actor] = []
             author_cursor: str = None
             commits_reviewed += 1
 
@@ -588,9 +588,9 @@ class LoadCommitAuthorIdsTask(repository.GitRepositoryTask, author.GitAuthorLook
                     for edge in response_json["data"]["node"]["authors"]["edges"]:
                         author_cursor = edge["cursor"]
                         if edge["node"]["user"] is not None:
-                            authors.append(self._find_author_by_id(edge["node"]["user"]["id"]))
+                            authors.append(self._find_actor_by_id(edge["node"]["user"]["id"]))
                         else:
-                            authors.append(author.Author('', author.AuthorType.UNKNOWN))
+                            authors.append(actor.Actor('', actor.ActorType.UNKNOWN))
 
                 author_dictionaries = list(map(base.to_dictionary, authors))
                 self._get_collection().update_one({'id': commit_id},

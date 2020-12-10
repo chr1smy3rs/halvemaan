@@ -20,7 +20,7 @@ import logging
 import luigi
 
 from halvemaan import base, repository, pull_request, pull_request_comment, pull_request_review, \
-    pull_request_review_comment, commit, author, commit_comment
+    pull_request_review_comment, commit, actor, commit_comment
 
 luigi.auto_namespace(scope=__name__)
 
@@ -78,7 +78,7 @@ class User:
         }
 
 
-class GitUsersTask(repository.GitRepositoryTask, metaclass=abc.ABCMeta):
+class GitSingleUsersTask(repository.GitSingleRepositoryTask, metaclass=abc.ABCMeta):
     """
     Task for loading users
     """
@@ -162,7 +162,7 @@ class GitUsersTask(repository.GitRepositoryTask, metaclass=abc.ABCMeta):
         some_author = item['author']
         if some_author is not None:
             author_id = some_author["id"]
-            if some_author["author_type"] == author.AuthorType.USER.name and author_id not in result \
+            if some_author["actor_type"] == actor.ActorType.USER.name and author_id not in result \
                     and not self._is_user_in_database(author_id):
                 result.add(author_id)
         return result
@@ -172,7 +172,7 @@ class GitUsersTask(repository.GitRepositoryTask, metaclass=abc.ABCMeta):
             editor = edit['editor']
             if editor is not None:
                 editor_id = editor["id"]
-                if editor["author_type"] == author.AuthorType.USER.name and editor_id not in result \
+                if editor["actor_type"] == actor.ActorType.USER.name and editor_id not in result \
                         and not self._is_user_in_database(editor_id):
                     result.add(editor_id)
         return result
@@ -182,7 +182,7 @@ class GitUsersTask(repository.GitRepositoryTask, metaclass=abc.ABCMeta):
             reaction_author = reaction['author']
             if reaction_author is not None:
                 reaction_author_id = reaction_author["id"]
-                if reaction_author["author_type"] == author.AuthorType.USER.name and reaction_author_id not in result \
+                if reaction_author["actor_type"] == actor.ActorType.USER.name and reaction_author_id not in result \
                         and not self._is_user_in_database(reaction_author_id):
                     result.add(reaction_author_id)
         return result
@@ -220,7 +220,7 @@ class GitUsersTask(repository.GitRepositoryTask, metaclass=abc.ABCMeta):
         return query
 
 
-class GitSubUsersTask(GitUsersTask, metaclass=abc.ABCMeta):
+class GitSubUsersTask(GitSingleUsersTask, metaclass=abc.ABCMeta):
     """
     Task for loading users from items underneath a pull request
     todo find a better name for this.  seriously, it sucks
@@ -254,14 +254,14 @@ class GitSubUsersTask(GitUsersTask, metaclass=abc.ABCMeta):
         return result
 
 
-class LoadUsersTask(GitUsersTask):
+class LoadUsersTask(GitSingleUsersTask):
     """
     Task for loading users from pull requests
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name),
-                pull_request.LoadParticipantsTask(owner=self.owner, name=self.name),
+        return [pull_request.LoadPullRequestsTaskSingle(owner=self.owner, name=self.name),
+                pull_request.LoadParticipantsTaskSingle(owner=self.owner, name=self.name),
                 pull_request.LoadEditsTask(owner=self.owner, name=self.name),
                 pull_request.LoadReactionsTask(owner=self.owner, name=self.name)]
 
@@ -279,7 +279,7 @@ class LoadUsersTask(GitUsersTask):
             for participant in pr['participants']:
                 if participant is not None:
                     participant_id = participant["id"]
-                    if participant["author_type"] == author.AuthorType.USER.name and participant_id not in result \
+                    if participant["actor_type"] == actor.ActorType.USER.name and participant_id not in result \
                             and not self._is_user_in_database(participant_id):
                         result.add(participant_id)
             result = self._add_edits(pr, result)
@@ -305,7 +305,7 @@ class LoadCommentUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.PULL_REQUEST_COMMENT
 
     def requires(self):
-        return [pull_request_comment.LoadCommentsTask(owner=self.owner, name=self.owner),
+        return [pull_request_comment.LoadCommentsTaskSingle(owner=self.owner, name=self.owner),
                 pull_request_comment.LoadCommentEditsTask(owner=self.owner, name=self.owner),
                 pull_request_comment.LoadCommentReactionsTask(owner=self.owner, name=self.owner)]
 
@@ -326,7 +326,7 @@ class LoadReviewUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW
 
     def requires(self):
-        return [pull_request_review.LoadReviewsTask(owner=self.owner, name=self.name),
+        return [pull_request_review.LoadReviewsTaskSingle(owner=self.owner, name=self.name),
                 pull_request_review.LoadReviewEditsTask(owner=self.owner, name=self.name),
                 pull_request_review.LoadReviewReactionsTask(owner=self.owner, name=self.name)]
 
@@ -347,7 +347,7 @@ class LoadReviewCommentUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW_COMMENT
 
     def requires(self):
-        return [pull_request_review_comment.LoadReviewCommentsTask(owner=self.owner, name=self.name),
+        return [pull_request_review_comment.LoadReviewCommentsTaskSingle(owner=self.owner, name=self.name),
                 pull_request_review_comment.LoadReviewCommentEditsTask(owner=self.owner, name=self.name),
                 pull_request_review_comment.LoadReviewCommentReactionsTask(owner=self.owner, name=self.name)]
 
@@ -355,13 +355,13 @@ class LoadReviewCommentUsersTask(GitSubUsersTask):
         luigi.run()
 
 
-class LoadCommitUsersTask(GitUsersTask):
+class LoadCommitUsersTask(GitSingleUsersTask):
     """
     Task for loading users from commits
     """
 
     def requires(self):
-        return [commit.LoadCommitAuthorIdsTask(owner=self.owner, name=self.name)]
+        return [commit.LoadCommitActorIdsTaskSingle(owner=self.owner, name=self.name)]
 
     def _find_unsaved_users(self) -> [str]:
         """
@@ -377,13 +377,13 @@ class LoadCommitUsersTask(GitUsersTask):
             for an_author in item['authors']:
                 if an_author is not None:
                     author_id = an_author["id"]
-                    if an_author["author_type"] == author.AuthorType.USER.name and author_id not in result \
+                    if an_author["actor_type"] == actor.ActorType.USER.name and author_id not in result \
                             and not self._is_user_in_database(author_id):
                         result.add(author_id)
             committer = item['committer']
             if committer is not None:
                 committer_id = committer["id"]
-                if committer["author_type"] == author.AuthorType.USER.name and committer_id not in result \
+                if committer["actor_type"] == actor.ActorType.USER.name and committer_id not in result \
                         and not self._is_user_in_database(committer_id):
                     result.add(committer_id)
         logging.debug(f'count query complete for expected users for commits in {self.repository}')
@@ -407,7 +407,7 @@ class LoadCommitCommentUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.COMMIT_COMMENT
 
     def requires(self):
-        return [commit_comment.LoadCommitCommentsTask(owner=self.owner, name=self.name),
+        return [commit_comment.LoadCommitCommentsTaskSingle(owner=self.owner, name=self.name),
                 commit_comment.LoadCommitCommentEditsTask(owner=self.owner, name=self.name),
                 commit_comment.LoadCommitCommentReactionsTask(owner=self.owner, name=self.name)]
 

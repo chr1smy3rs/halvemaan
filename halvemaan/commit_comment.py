@@ -18,7 +18,7 @@ import logging
 
 import luigi
 
-from halvemaan import repository, user, commit, base, author, content
+from halvemaan import repository, user, commit, base, actor, content
 
 luigi.auto_namespace(scope=__name__)
 
@@ -72,8 +72,8 @@ class CommitComment(content.Comment):
         }
 
 
-class LoadCommitCommentsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin,
-                             repository.GitRepositoryCountMixin):
+class LoadCommitCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                   repository.GitRepositoryCountMixin):
     """
     Task for loading comment ids for saved commits
     """
@@ -135,7 +135,7 @@ class LoadCommitCommentsTask(repository.GitRepositoryTask, author.GitAuthorLooku
 
                         # author can be None.  Who knew?
                         if edge["node"]["author"] is not None:
-                            commit_comment.author = self._find_author_by_login(edge["node"]["author"]["login"])
+                            commit_comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
                         commit_comment.author_association = edge["node"]['authorAssociation']
 
                         # set the position
@@ -238,7 +238,7 @@ class LoadCommitCommentsTask(repository.GitRepositoryTask, author.GitAuthorLooku
         luigi.run()
 
 
-class LoadCommitCommentEditsTask(content.GitMongoEditsTask):
+class LoadCommitCommentEditsTask(content.GitSingleMongoEditsTask):
     """
     Task for loading edits for stored commit comments
     """
@@ -251,7 +251,7 @@ class LoadCommitCommentEditsTask(content.GitMongoEditsTask):
         self.object_type = base.ObjectType.COMMIT_COMMENT
 
     def requires(self):
-        return [LoadCommitCommentsTask(owner=self.owner, name=self.name)]
+        return [LoadCommitCommentsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -295,7 +295,7 @@ class LoadCommitCommentEditsTask(content.GitMongoEditsTask):
         luigi.run()
 
 
-class LoadCommitCommentReactionsTask(content.GitMongoReactionsTask):
+class LoadCommitCommentReactionsTask(content.GitSingleMongoReactionsTask):
     """
     Task for loading reactions for stored commit comments
     """
@@ -308,7 +308,7 @@ class LoadCommitCommentReactionsTask(content.GitMongoReactionsTask):
         self.object_type = base.ObjectType.COMMIT_COMMENT
 
     def requires(self):
-        return [LoadCommitCommentsTask(owner=self.owner, name=self.name)]
+        return [LoadCommitCommentsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

@@ -19,7 +19,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import base, user, repository, content, author
+from halvemaan import base, user, repository, content, actor
 
 luigi.auto_namespace(scope=__name__)
 
@@ -36,12 +36,12 @@ class PullRequest:
         self.object_type: base.ObjectType = base.ObjectType.PULL_REQUEST
         self.id: str = request_id
         self.repository_id: str = repository_id
-        self.author: author.Author = author.Author('', author.AuthorType.UNKNOWN)
+        self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.author_association: str = None
         self.create_datetime: datetime = datetime.now()
         self.body_text: str = ''
         self.total_participants: int = 0
-        self.participants: [author.Author] = []
+        self.participants: [actor.Actor] = []
         self.total_comments: int = 0
         self.comment_ids: [str] = []
         self.total_reviews: int = 0
@@ -94,13 +94,13 @@ class PullRequest:
         }
 
 
-class LoadPullRequestsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadPullRequestsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
     """
     Task for loading pull requests from git's graphql interface
     """
 
     def requires(self):
-        return [repository.LoadRepositoriesTask(owner=self.owner, name=self.name)]
+        return [repository.LoadRepositoriesTaskSingle(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -143,7 +143,7 @@ class LoadPullRequestsTask(repository.GitRepositoryTask, author.GitAuthorLookupM
 
                         # author can be None.  Who knew?
                         if edge["node"]["author"] is not None:
-                            pr.author = self._find_author_by_login(edge["node"]["author"]["login"])
+                            pr.author = self._find_actor_by_login(edge["node"]["author"]["login"])
                         pr.author_association = pr.author_login = edge["node"]["authorAssociation"]
 
                         # parse the datetime
@@ -239,13 +239,13 @@ class LoadPullRequestsTask(repository.GitRepositoryTask, author.GitAuthorLookupM
         luigi.run()
 
 
-class LoadParticipantsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadParticipantsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
     """
     Task for loading participants from the stored pull requests
     """
 
     def requires(self):
-        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
 
     def _get_expected_results(self):
         """
@@ -308,7 +308,7 @@ class LoadParticipantsTask(repository.GitRepositoryTask, author.GitAuthorLookupM
                     # iterate over each participant returned (we return 100 at a time)
                     for edge in response_json["data"]["node"]["participants"]["edges"]:
                         participant_cursor = edge["cursor"]
-                        author = self._find_author_by_id(edge["node"]["id"])
+                        author = self._find_actor_by_id(edge["node"]["id"])
                         participants.append(author.to_dictionary())
 
                 self._get_collection().update_one({'id': pull_request_id},
@@ -352,13 +352,13 @@ class LoadParticipantsTask(repository.GitRepositoryTask, author.GitAuthorLookupM
         luigi.run()
 
 
-class LoadCommitIdsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadCommitIdsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
     """
     Task for loading commits from the stored pull requests
     """
 
     def requires(self):
-        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
 
     def _get_expected_results(self):
         """
@@ -492,7 +492,7 @@ class LoadCommitIdsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixi
         luigi.run()
 
 
-class LoadEditsTask(content.GitMongoEditsTask):
+class LoadEditsTask(content.GitSingleMongoEditsTask):
     """
     Task for loading edits for stored pull requests
     """
@@ -505,7 +505,7 @@ class LoadEditsTask(content.GitMongoEditsTask):
         self.object_type = base.ObjectType.PULL_REQUEST
 
     def requires(self):
-        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -549,7 +549,7 @@ class LoadEditsTask(content.GitMongoEditsTask):
         luigi.run()
 
 
-class LoadReactionsTask(content.GitMongoReactionsTask):
+class LoadReactionsTask(content.GitSingleMongoReactionsTask):
     """
     Task for loading reactions from the stored pull requests
     """
@@ -562,7 +562,7 @@ class LoadReactionsTask(content.GitMongoReactionsTask):
         self.object_type = base.ObjectType.PULL_REQUEST
 
     def requires(self):
-        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

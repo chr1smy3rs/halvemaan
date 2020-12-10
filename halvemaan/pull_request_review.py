@@ -19,7 +19,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import base, user, content, repository, pull_request, author
+from halvemaan import base, user, content, repository, pull_request, actor
 
 luigi.auto_namespace(scope=__name__)
 
@@ -37,7 +37,7 @@ class PullRequestReview:
         self.id: str = review_id
         self.pull_request_id: str = pull_request_id
         self.repository_id: str = None
-        self.author: author.Author = author.Author('', author.AuthorType.UNKNOWN)
+        self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.author_association: str = ''
         self.create_datetime: datetime = datetime.now()
         self.commit_id: str = None
@@ -90,13 +90,13 @@ class PullRequestReview:
         }
 
 
-class LoadReviewsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadReviewsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
     """
     Task for loading reviews for the stored pull requests
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [pull_request.LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -144,7 +144,7 @@ class LoadReviewsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin,
 
                     # author can be None.  Who knew?
                     if edge["node"]["author"] is not None:
-                        review.author = self._find_author_by_login(edge["node"]["author"]["login"])
+                        review.author = self._find_actor_by_login(edge["node"]["author"]["login"])
                     review.author_association = edge["node"]["authorAssociation"]
 
                     # check to see if pull request review is in the database
@@ -185,8 +185,8 @@ class LoadReviewsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin,
         return self._get_objects_saved_count(self.repository, base.ObjectType.PULL_REQUEST_REVIEW)
 
     def _get_actual_reviews(self, pull_request_id: str):
-        return self._get_collection().count({'pull_request_id': pull_request_id,
-                                             'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
+        return self._get_collection().count_documents({'pull_request_id': pull_request_id,
+                                                       'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
 
     @staticmethod
     def _pull_request_reviews_query(pull_request_id: str, review_cursor: str) -> str:
@@ -240,7 +240,7 @@ class LoadReviewsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin,
         luigi.run()
 
 
-class LoadReviewEditsTask(content.GitMongoEditsTask):
+class LoadReviewEditsTask(content.GitSingleMongoEditsTask):
     """
     Task for loading edits for stored pull request reviews
     """
@@ -253,7 +253,7 @@ class LoadReviewEditsTask(content.GitMongoEditsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW
 
     def requires(self):
-        return [LoadReviewsTask(owner=self.owner, name=self.name)]
+        return [LoadReviewsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -297,7 +297,7 @@ class LoadReviewEditsTask(content.GitMongoEditsTask):
         luigi.run()
 
 
-class LoadReviewReactionsTask(content.GitMongoReactionsTask):
+class LoadReviewReactionsTask(content.GitSingleMongoReactionsTask):
     """
     Task for loading reactions for stored pull request reviews
     """
@@ -310,7 +310,7 @@ class LoadReviewReactionsTask(content.GitMongoReactionsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW
 
     def requires(self):
-        return [LoadReviewsTask(owner=self.owner, name=self.name)]
+        return [LoadReviewsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

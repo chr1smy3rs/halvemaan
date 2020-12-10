@@ -44,7 +44,6 @@ class GraphQLClient:
         self.header_token = 'bearer ' + git_token
 
     def execute_query(self, query: str, counter: int = 3) -> json:
-
         try:
             response = requests.post(self.url, json={'query': query},
                                      headers={'Authorization': self.header_token})

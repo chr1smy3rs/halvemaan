@@ -23,7 +23,7 @@ import luigi
 luigi.auto_namespace(scope=__name__)
 
 
-class AuthorType(Enum):
+class ActorType(Enum):
     """enum for the various author types stored within the system"""
 
     USER = auto()
@@ -34,15 +34,15 @@ class AuthorType(Enum):
     UNKNOWN = auto()
 
 
-class Author:
-    """class that contains the data for linking to an author, or editor or deleter"""
+class Actor:
+    """class that contains the data for linking to a repository owner, author, editor or deleter"""
 
-    def __init__(self, author_id: str, author_type: AuthorType):
-        self.id: str = author_id
-        self.author_type: AuthorType = author_type
+    def __init__(self, actor_id: str, actor_type: ActorType):
+        self.id: str = actor_id
+        self.actor_type: ActorType = actor_type
 
     def __str__(self):
-        return f'Author: [id: {self.id}] [type: {self.author_type.name}]'
+        return f'Actor: [id: {self.id}] [type: {self.actor_type.name}]'
 
     def to_dictionary(self) -> {}:
         """
@@ -51,33 +51,33 @@ class Author:
         """
         return {
             'id': self.id,
-            'author_type': self.author_type.name
+            'actor_type': self.actor_type.name
         }
 
 
-class GitAuthorLookupMixin:
+class GitActorLookupMixin:
     """contains all of the lookup information for authors that don't have an identifier"""
 
     @lru_cache(maxsize=None)
-    def _find_author_by_id(self, node_id: str) -> Author:
+    def _find_actor_by_id(self, node_id: str) -> Actor:
         logging.debug(f'running query for node: [{node_id}]')
         query = self._type_query(node_id)
         response_json = self.graph_ql_client.execute_query(query)
         logging.debug(f'query complete for user: [{node_id}]')
         try:
             typename = response_json["data"]["node"]["__typename"].upper()
-            for author_type in AuthorType:
-                if typename == author_type.name:
-                    return Author(node_id, author_type)
+            for actor_type in ActorType:
+                if typename == actor_type.name:
+                    return Actor(node_id, actor_type)
             logging.error(f'could not find node type: [{node_id}][{response_json}]')
-            return Author(node_id, AuthorType.UNKNOWN)
+            return Actor(node_id, ActorType.UNKNOWN)
 
         except KeyError as e:
             logging.error(f'parsing failed for node: [{node_id}][{response_json}][{e}]')
-            return Author(node_id, AuthorType.UNKNOWN)
+            return Actor(node_id, ActorType.UNKNOWN)
 
     @lru_cache(maxsize=None)
-    def _find_author_by_login(self, login: str) -> Author:
+    def _find_actor_by_login(self, login: str) -> Actor:
         # todo add support for bots and everything else....
         has_next_page: bool = True
         user_cursor: str = None
@@ -107,13 +107,13 @@ class GitAuthorLookupMixin:
                     for user_json in user_jsons:
                         if user_json["login"] == login:
                             logging.debug(f'record found for user: [{login}: {user_json["id"]}]')
-                            return Author(user_json["id"], AuthorType.USER)
+                            return Actor(user_json["id"], ActorType.USER)
 
             except KeyError as e:
                 logging.error(f'parsing failed for user: [{login}][{response_json}][{e}]')
 
         logging.error(f'query complete for user: [{login}] - NO RECORD FOUND')
-        return Author(login, AuthorType.UNKNOWN)
+        return Actor(login, ActorType.UNKNOWN)
 
     @staticmethod
     def _type_query(node_id: str) -> str:

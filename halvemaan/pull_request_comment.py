@@ -18,7 +18,7 @@ import logging
 
 import luigi
 
-from halvemaan import content, base, user, repository, pull_request, author
+from halvemaan import content, base, user, repository, pull_request, actor
 
 luigi.auto_namespace(scope=__name__)
 
@@ -70,13 +70,13 @@ class PullRequestComment(content.Comment):
         }
 
 
-class LoadCommentsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
     """
     Task for loading comments for the stored pull requests
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [pull_request.LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -126,7 +126,7 @@ class LoadCommentsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin
 
                     # author can be None.  Who knew?
                     if edge["node"]["author"] is not None:
-                        comment.author = self._find_author_by_login(edge["node"]["author"]["login"])
+                        comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
                     comment.author_association = edge["node"]["authorAssociation"]
 
                     # load if the comment has been minimized
@@ -179,8 +179,8 @@ class LoadCommentsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin
         return self._get_objects_saved_count(self.repository, base. ObjectType.PULL_REQUEST_COMMENT)
 
     def _get_actual_comments(self, pull_request_id: str):
-        return self._get_collection().count({'pull_request_id': pull_request_id,
-                                            'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
+        return self._get_collection().count_documents({'pull_request_id': pull_request_id,
+                                                       'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
 
     @staticmethod
     def _pull_request_comments_query(pull_request_id: str, comment_cursor: str) -> str:
@@ -229,7 +229,7 @@ class LoadCommentsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin
         luigi.run()
 
 
-class LoadCommentEditsTask(content.GitMongoEditsTask):
+class LoadCommentEditsTask(content.GitSingleMongoEditsTask):
     """
     Task for loading edits for stored pull request comments
     """
@@ -242,7 +242,7 @@ class LoadCommentEditsTask(content.GitMongoEditsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_COMMENT
 
     def requires(self):
-        return [LoadCommentsTask(owner=self.owner, name=self.name)]
+        return [LoadCommentsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -286,7 +286,7 @@ class LoadCommentEditsTask(content.GitMongoEditsTask):
         luigi.run()
 
 
-class LoadCommentReactionsTask(content.GitMongoReactionsTask):
+class LoadCommentReactionsTask(content.GitSingleMongoReactionsTask):
     """
     Task for loading reactions for stored pull request comments
     """
@@ -299,7 +299,7 @@ class LoadCommentReactionsTask(content.GitMongoReactionsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_COMMENT
 
     def requires(self):
-        return [LoadCommentsTask(owner=self.owner, name=self.name)]
+        return [LoadCommentsTaskSingle(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

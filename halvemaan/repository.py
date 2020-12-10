@@ -20,7 +20,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import base
+from halvemaan import base, actor
 
 luigi.auto_namespace(scope=__name__)
 
@@ -28,16 +28,16 @@ luigi.auto_namespace(scope=__name__)
 class Repository:
     """ contains the data for a git repository """
 
-    def __init__(self, repository_owner: str, repository_name: str):
+    def __init__(self):
         """
         init for a git repository
-        :param str repository_owner: owner of the repository
-        :param str repository_name: repository's name
         """
-        self.name: str = repository_name
-        self.owner: str = repository_owner
         self.id: str = None
+        self.name: str = None
+        self.owner_login: str = None
+        self.owner: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.total_pull_requests: int = 0
+        self.pull_request_ids: [str] = []
         self.insert_datetime: datetime = datetime.now()
         self.update_datetime: datetime = datetime.now()
         self.object_type: base.ObjectType = base.ObjectType.REPOSITORY
@@ -57,40 +57,67 @@ class Repository:
         return {
             'id': self.id,
             'name': self.name,
-            'owner': self.owner,
+            'owner_login': self.owner_login,
+            'owner': self.owner.to_dictionary(),
             'total_pull_requests': self.total_pull_requests,
+            'pull_request_ids': self.pull_request_ids,
             'insert_timestamp': self.insert_datetime,
             'update_timestamp': self.update_datetime,
             'object_type': self.object_type.name
         }
 
+    @staticmethod
+    def parse_dictionary(json):
+        repository: Repository = Repository()
+        repository.id = json['id']
+        repository.owner = actor.Actor(json['owner']['id'], actor.ActorType[json['owner']['actor_type']])
+        repository.owner_login = json['owner_login']
+        repository.name = json['name']
+        repository.total_pull_requests = json['total_pull_requests']
+        repository.pull_request_ids = json['pull_request_ids']
+        repository.insert_datetime = json['insert_timestamp']
+        repository.update_datetime = json['update_timestamp']
+        return repository
 
-class GitRepositoryLookupMixin:
-    """contains all of the lookup information for repository based on owner and name"""
 
-    def _get_repository(self, owner: str, name: str) -> Repository:
+class GitRepositoryBasedTask(base.GitMongoTask, metaclass=abc.ABCMeta):
+    """contains base operations for repository based tasks """
+
+    def _get_repository_by_owner_and_name(self, owner_login: str, name: str) -> Repository:
         """
         returns the document for the repository
-        :param str owner: the owner of the repository we are searching
-        :param str name: the name of the repository we are searching
+        :param str owner_login: the owner of the repository we are searching for
+        :param str name: the name of the repository we are searching for
         :return: expected counts
         """
-        logging.debug(f'running a query for the repository record for Repository: [owner: {owner} name: {name}] '
+        logging.debug(f'running a query for the repository record for Repository: [owner: {owner_login} name: {name}] '
                       f'in database')
-        found_repo = self._get_collection().find_one({'owner': owner, 'name': name, 'object_type': 'REPOSITORY'})
-        logging.debug(f'query for the repository record for Repository: [owner: {owner} name: {name}] in database')
+        found_repo = self._get_collection().find_one({'owner_login': owner_login, 'name': name,
+                                                      'object_type': base.ObjectType.REPOSITORY.name})
+        logging.debug(f'query for the repository record for '
+                      f'Repository: [owner: {owner_login} name: {name}] in database')
         if found_repo is not None:
-            repository: Repository = Repository(found_repo['owner'], found_repo['name'])
-            repository.id = found_repo['id']
-            repository.total_pull_requests = found_repo['total_pull_requests']
-            return repository
+            return Repository.parse_dictionary(found_repo)
         else:
             return None
 
-
-class GitRepositoryCountMixin:
+    def _get_repository_by_id(self, repo_id: str) -> Repository:
+        """
+        returns the document for the repository
+        :param str repo_id: the id of the repository we are searching for
+        :return: expected counts
+        """
+        logging.debug(f'running a query for the repository record for Repository: [owner: {id}] '
+                      f'in database')
+        found_repo = self._get_collection().find_one({'id': repo_id, 'object_type': 'REPOSITORY'})
+        logging.debug(f'query for the repository record for Repository: [owner: {repo_id}] in database')
+        if found_repo is not None:
+            return Repository.parse_dictionary(found_repo)
+        else:
+            return None
 
     def _get_objects_saved_count(self, repository: Repository, object_type: base.ObjectType) -> int:
+        # todo think about me
         """
         returns the expected count per repository
         :param Repository repository: the repository we are searching
@@ -98,13 +125,14 @@ class GitRepositoryCountMixin:
         :return: expected counts
         """
         logging.debug(f'running count query for {object_type.name} against {repository} in database')
-        count: int = self._get_collection().count({'repository_id': repository.id, 'object_type': object_type.name})
+        count: int = self._get_collection().count_documents({'repository_id': repository.id,
+                                                             'object_type': object_type.name})
         logging.debug(f'count query complete for {object_type.name} against {repository} in database')
         return count
 
 
-class GitRepositoryTask(base.GitMongoTask, GitRepositoryLookupMixin, metaclass=abc.ABCMeta):
-    """ base implementation for task ran against a repository """
+class GitSingleRepositoryTask(GitRepositoryBasedTask, metaclass=abc.ABCMeta):
+    """ base implementation for task ran against a single repository """
 
     owner: str = luigi.Parameter()
     name: str = luigi.Parameter()
@@ -116,7 +144,7 @@ class GitRepositoryTask(base.GitMongoTask, GitRepositoryLookupMixin, metaclass=a
     @property
     def repository(self) -> Repository:
         if self._repository is None:
-            self._repository = self._get_repository(self.owner, self.name)
+            self._repository = self._get_repository_by_owner_and_name(self.owner, self.name)
         return self._repository
 
     @repository.setter
@@ -124,7 +152,7 @@ class GitRepositoryTask(base.GitMongoTask, GitRepositoryLookupMixin, metaclass=a
         self._repository = value
 
 
-class GitMultiRepositoryTask(base.GitMongoTask, metaclass=abc.ABCMeta):
+class GitMultiRepositoryTask(GitRepositoryBasedTask, metaclass=abc.ABCMeta):
     """
     base implementation for task ran against multiple repositories
     {repositories:[{owner:<owner>, name:<name>}]}
@@ -136,9 +164,14 @@ class GitMultiRepositoryTask(base.GitMongoTask, metaclass=abc.ABCMeta):
         super().__init__(*args, **kwargs)
 
 
-class LoadRepositoriesTask(GitRepositoryTask, GitRepositoryLookupMixin):
+class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading repositories from git's graphql interface
+
+    Three test cases:
+    no record, insert new
+    record found, counts mismatch, update
+    record found, counts match
     """
 
     def requires(self):
@@ -156,10 +189,13 @@ class LoadRepositoriesTask(GitRepositoryTask, GitRepositoryLookupMixin):
 
         if response_json["data"]["repository"] is not None:
 
-            saved_repository: Repository = self._get_repository(self.owner, self.name)
+            saved_repository: Repository = self._get_repository_by_owner_and_name(self.owner, self.name)
             if saved_repository is None:
-                repository: Repository = Repository(self.owner, self.name)
+                repository: Repository = Repository()
                 repository.id = response_json["data"]["repository"]["id"]
+                repository.owner_login = response_json["data"]["repository"]["owner"]["login"]
+                repository.owner = self._find_actor_by_id(response_json["data"]["repository"]["owner"]["id"])
+                repository.name = response_json["data"]["repository"]["name"]
                 repository.total_pull_requests = response_json["data"]["repository"]["pullRequests"]["totalCount"]
 
                 logging.debug(f'inserting record for {repository}')
@@ -187,14 +223,29 @@ class LoadRepositoriesTask(GitRepositoryTask, GitRepositoryLookupMixin):
         always expects the repo to be created
         :return: True
         """
-        return True
+        logging.debug(
+            f'running count of expected pull requests query for Repository: [owner: {self.owner} name: {self.name}]'
+        )
+        query = self._repository_query()
+        response_json = self.graph_ql_client.execute_query(query)
+        logging.debug(
+            f'count of expected pull requests query complete for Repository: [owner: {self.owner} name: {self.name}]'
+        )
+
+        if response_json["data"]["repository"] is not None:
+            return response_json["data"]["repository"]["pullRequests"]["totalCount"]
+        else:
+            return 0
 
     def _get_actual_results(self):
         """
-        returns whether or not the repo exists
+        return the current count of pull requests stored
         :return: True if the repo exists
         """
-        return self.repository is not None
+        if self.repository is not None:
+            return self.repository.total_pull_requests
+        else:
+            return 0
 
     def _repository_query(self) -> str:
         # static method for getting the query for all the repository
@@ -203,12 +254,108 @@ class LoadRepositoriesTask(GitRepositoryTask, GitRepositoryLookupMixin):
                {
                  repository(name:\"""" + self.name + """\", owner:\"""" + self.owner + """\") {
                    id
+                    owner {
+                      id
+                      login
+                    }
+                    name
                    pullRequests (first: 1, states: MERGED) { 
                      totalCount  
                    }      
                  }
                }
                """
+        return query
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
+class LoadRepositoryPullRequestIdsTask(GitSingleRepositoryTask):
+    """
+    Task for loading pull request ids for a single repository from git's graphql interface
+
+    Two test cases:
+    counts match, no action
+    counts don't match, insert missing
+    """
+
+    def requires(self):
+        return [LoadRepositoryTask(owner=self.owner, name=self.name)]
+
+    def run(self):
+        """
+        loads the pull request for a specific repository
+        :return: None
+        """
+        if self._get_expected_results() != self._get_actual_results():
+            pull_requests_loaded: int = 0
+            pull_request_cursor: str = None
+
+            # continue executing gets against git until we have all the PRs
+            while self.repository.total_pull_requests > pull_requests_loaded:
+                logging.debug(f'running query for pull requests against {self.repository}')
+                query = self._pull_request_query(pull_request_cursor)
+                response_json = self.graph_ql_client.execute_query(query)
+                logging.debug(f'query complete for pull requests against {self.repository}')
+
+                # iterate over each pull request returned (we return 20 at a time)
+                for edge in response_json["data"]["repository"]["pullRequests"]["edges"]:
+                    pull_requests_loaded += 1
+                    pull_request_cursor = edge["cursor"]
+                    pull_request_id = edge["node"]["id"]
+
+                logging.debug(
+                    f'pull requests found for {self.repository} '
+                    f'{pull_requests_loaded}/{self.repository.total_pull_requests}'
+                )
+
+            actual_count: int = self._get_actual_results()
+            logging.debug(
+                f'pull requests returned for {self.repository} returned: [{actual_count}], '
+                f'expected: [{self.repository.total_pull_requests}]'
+            )
+
+    def _get_expected_results(self):
+        """
+        returns the expected count per repository
+        :return: expected counts
+        """
+        return self.repository.total_pull_requests
+
+    def _get_actual_results(self):
+        """
+        returns the actual count per repository
+        :return: expected counts
+        """
+        return len(self.repository.pull_request_ids)
+
+    def _pull_request_query(self, pull_request_cursor: str) -> str:
+        """
+        creates a graphql query for the pull requests within a specific repository - asks for 100 PRs a time
+        :param pull_request_cursor: the cursor that indicates where to records were loaded until
+        :return: the query string
+        """
+
+        after = ''
+        if pull_request_cursor:
+            after = 'after:"' + pull_request_cursor + '", '
+
+        # todo configure states dynamically.
+        query = """
+        {
+          repository(name:\"""" + self.repository.name + """\", owner:\"""" + self.repository.owner_login + """\") {
+            pullRequests (first: 100, """ + after + """states: MERGED) { 
+              edges { 
+                cursor 
+                node { 
+                  id
+                } 
+              } 
+            }      
+          }
+        }
+        """
         return query
 
     if __name__ == '__main__':

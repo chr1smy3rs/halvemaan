@@ -19,7 +19,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import base, repository, author, commit
+from halvemaan import base, repository, actor, commit
 
 luigi.auto_namespace(scope=__name__)
 
@@ -79,8 +79,8 @@ class CheckSuite:
         }
 
 
-class LoadCommitCheckSuitesTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin,
-                                repository.GitRepositoryCountMixin):
+class LoadCommitCheckSuitesTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                      repository.GitRepositoryCountMixin):
     """
     Task for loading check suite ids for saved commits
     """

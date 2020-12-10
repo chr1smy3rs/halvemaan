@@ -18,7 +18,7 @@ import abc
 import logging
 from datetime import datetime
 
-from halvemaan import repository, base, author
+from halvemaan import repository, base, actor
 
 
 class ContentEdit:
@@ -31,7 +31,7 @@ class ContentEdit:
         """
         self.id: str = edit_id
         self.edit_datetime: datetime = datetime.now()
-        self.editor: author.Author = author.Author('', author.AuthorType.UNKNOWN)
+        self.editor: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.difference: str = ''
         self.is_delete: bool = False
 
@@ -55,8 +55,8 @@ class ContentEdit:
         }
 
 
-class GitMongoEditsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin,
-                        metaclass=abc.ABCMeta):
+class GitSingleMongoEditsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin,
+                              metaclass=abc.ABCMeta):
     """
     base task for loading edits for stored documents
     """
@@ -128,14 +128,14 @@ class GitMongoEditsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixi
                         edits.append(edit)
                         edit.edit_datetime = base.to_datetime_from_str(edge["node"]["editedAt"])
                         if edge["node"]["editor"] is not None:
-                            edit.editor = self._find_author_by_login(edge["node"]["editor"]["login"])
+                            edit.editor = self._find_actor_by_login(edge["node"]["editor"]["login"])
                         # checking to see if this is an edit
                         if edge["node"]["diff"] is not None:
                             edit.difference = edge["node"]["diff"]
 
                         if edge["node"]["deletedAt"] is not None:
                             if edge["node"]["deletedBy"] is not None:
-                                edit.editor = self._find_author_by_login(edge["node"]["deletedBy"]["login"])
+                                edit.editor = self._find_actor_by_login(edge["node"]["deletedBy"]["login"])
                             edit.edit_datetime = base.to_datetime_from_str(edge["node"]["deletedAt"])
                             edit.is_delete = True
                             has_delete = True
@@ -167,7 +167,7 @@ class Reaction:
         :param str reaction_id: identifier for the reaction
         """
         self.id: str = reaction_id
-        self.author: author.Author = author.Author('', author.AuthorType.UNKNOWN)
+        self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.create_datetime: datetime = datetime.now()
         self.content: str = ''
 
@@ -191,8 +191,8 @@ class Reaction:
         }
 
 
-class GitMongoReactionsTask(repository.GitRepositoryTask, author.GitAuthorLookupMixin, repository.GitRepositoryCountMixin,
-                            metaclass=abc.ABCMeta):
+class GitSingleMongoReactionsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin,
+                                  metaclass=abc.ABCMeta):
     """
     base task for loading reactions for stored documents
     """
@@ -268,7 +268,7 @@ class GitMongoReactionsTask(repository.GitRepositoryTask, author.GitAuthorLookup
 
                         # author can be None.  Who knew?
                         if edge["node"]["user"] is not None:
-                            reaction.author = self._find_author_by_id(edge["node"]["user"]["id"])
+                            reaction.author = self._find_actor_by_id(edge["node"]["user"]["id"])
                         reactions.append(reaction)
 
                 reaction_dictionaries = list(map(base.to_dictionary, reactions))
@@ -300,7 +300,7 @@ class Comment:
         """
         self.id: str = comment_id
         self.repository_id: str = None
-        self.author: author.Author = author.Author('', author.AuthorType.UNKNOWN)
+        self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.author_association: str = ''
         self.create_datetime: datetime = datetime.now()
         self.body_text: str = ''

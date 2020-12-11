@@ -289,11 +289,11 @@ class LoadRepositoryPullRequestIdsTask(GitSingleRepositoryTask):
         :return: None
         """
         if self._get_expected_results() != self._get_actual_results():
-            pull_requests_loaded: int = 0
             pull_request_cursor: str = None
+            pull_request_ids: [str] = []
 
             # continue executing gets against git until we have all the PRs
-            while self.repository.total_pull_requests > pull_requests_loaded:
+            while self.repository.total_pull_requests > len(pull_request_ids):
                 logging.debug(f'running query for pull requests against {self.repository}')
                 query = self._pull_request_query(pull_request_cursor)
                 response_json = self.graph_ql_client.execute_query(query)
@@ -301,14 +301,17 @@ class LoadRepositoryPullRequestIdsTask(GitSingleRepositoryTask):
 
                 # iterate over each pull request returned (we return 20 at a time)
                 for edge in response_json["data"]["repository"]["pullRequests"]["edges"]:
-                    pull_requests_loaded += 1
                     pull_request_cursor = edge["cursor"]
-                    pull_request_id = edge["node"]["id"]
+                    pull_request_ids.append(edge["node"]["id"])
 
                 logging.debug(
                     f'pull requests found for {self.repository} '
-                    f'{pull_requests_loaded}/{self.repository.total_pull_requests}'
+                    f'{len(pull_request_ids)}/{self.repository.total_pull_requests}'
                 )
+
+            self._get_collection().update_one({'id': self.repository.id},
+                                              {'$set': {'pull_request_ids': pull_request_ids,
+                                                        'update_timestamp': datetime.now()}})
 
             actual_count: int = self._get_actual_results()
             logging.debug(

@@ -1,0 +1,116 @@
+{
+  "no_record": {
+    "matchers":[
+      {
+        "match": "owner",
+        "response" : {
+                "data": {
+                  "repository": {
+                    "id": "111111",
+                    "owner": {
+                      "id": "222222",
+                      "login": "test_owner"
+                    },
+                    "name": "test_no_record",
+                    "pullRequests": {
+                      "totalCount": 1
+                    }
+                  }
+                }
+              }
+      }, {
+        "match": "__typename",
+        "response" : {
+                "data": {
+                  "node": {
+                    "__typename": "Organization",
+                    "id": "222222"
+                  }
+                }
+              }
+      }
+    ]
+  },
+  "one_record_counts_match": {
+    "matchers":[
+      {
+        "match": "owner",
+        "response" : {
+              "data": {
+                "repository": {
+                  "id": "333333",
+                  "owner": {
+                    "id": "222222",
+                    "login": "test_owner"
+                  },
+                  "name": "test_one_record",
+                  "pullRequests": {
+                    "totalCount": 2
+                  }
+                }
+              }
+            }
+      }, {
+        "match": "__typename",
+        "response" : {
+                "data": {
+                  "node": {
+                    "__typename": "Organization",
+                    "id": "222222"
+                  }
+                }
+              }
+      }
+    ],
+    "data": [{
+      "type": "REPOSITORY",
+      "id": "333333",
+      "owner_login": "test_owner",
+      "owner_id": "222222",
+      "owner_type": "ORGANIZATION",
+      "name": "test_one_record",
+      "total_pull_requests":2
+    }]
+  },
+  "one_record_counts_mismatch": {
+    "matchers":[
+      {
+        "match": "owner",
+        "response" : {
+              "data": {
+                "repository": {
+                  "id": "444444",
+                  "owner": {
+                    "id": "222222",
+                    "login": "test_owner"
+                  },
+                  "name": "test_mismatch",
+                  "pullRequests": {
+                    "totalCount": 3
+                  }
+                }
+              }
+            }
+      }, {
+        "match": "__typename",
+        "response" : {
+                "data": {
+                  "node": {
+                    "__typename": "Organization",
+                    "id": "222222"
+                  }
+                }
+              }
+      }
+    ],
+    "data": [{
+      "type": "REPOSITORY",
+      "id": "444444",
+      "owner_login": "test_owner",
+      "owner_id": "222222",
+      "owner_type": "ORGANIZATION",
+      "name": "test_mismatch",
+      "total_pull_requests":2
+    }]
+  }
+}

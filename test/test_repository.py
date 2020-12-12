@@ -115,6 +115,28 @@ class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
         self.assertEqual(1, returned_repo['total_pull_requests'])
         self.assertEqual(1, len(returned_repo['pull_request_ids']))
 
+    @requests_mock.Mocker()
+    @mongomock.patch(servers=(('mongo.mock.com', 27017),))
+    def test_one_record_counts_match(self, m):
+
+        case_setup = CaseSetup('load_pull_request_ids', 'one_record_counts_match')
+        mongo_collection = case_setup.get_mongo_collection()
+
+        m.post('http://graphql.mock.com', text=case_setup.callback)
+
+        case_setup.load_data()
+
+        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='test_owner',
+                                                                          name='test_one_pull_request_match')],
+                             local_scheduler=True)
+        self.assertEqual(True, result)
+        count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '777777'})
+        self.assertEqual(1, count)
+        returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '777777'})
+        self.assertEqual('777777', returned_repo['id'])
+        self.assertEqual(1, returned_repo['total_pull_requests'])
+        self.assertEqual(1, len(returned_repo['pull_request_ids']))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -46,5 +46,36 @@
       "name": "test_one_pull_request",
       "total_pull_requests":1
     }]
+  },
+  "one_record_counts_match": {
+    "matchers":[
+      {
+        "match": "login",
+        "response" : {
+                "data": {
+                  "repository": {
+                    "id": "777777",
+                    "owner": {
+                      "id": "222222",
+                      "login": "test_owner"
+                    },
+                    "name": "test_one_pull_request_match",
+                    "pullRequests": {
+                      "totalCount": 1
+                    }
+                  }
+                }
+              }
+      }],
+    "data": [{
+      "type": "REPOSITORY",
+      "id": "777777",
+      "owner_login": "test_owner",
+      "owner_id": "222222",
+      "owner_type": "ORGANIZATION",
+      "name": "test_one_pull_request_match",
+      "total_pull_requests":1,
+      "pull_request_ids": ["666666"]
+    }]
   }
 }

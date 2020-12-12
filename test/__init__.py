@@ -76,6 +76,9 @@ class CaseSetup:
         test_repo.insert_datetime = timestamp
         test_repo.update_datetime = timestamp
 
+        if "pull_request_ids" in repository_json:
+            test_repo.pull_request_ids = repository_json["pull_request_ids"]
+
         # build the actor
         for actor_type in actor.ActorType:
             if repository_json['owner_type'] == actor_type.name:

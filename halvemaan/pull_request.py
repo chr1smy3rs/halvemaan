@@ -27,15 +27,13 @@ luigi.auto_namespace(scope=__name__)
 class PullRequest:
     """ contains the data for a pull request """
 
-    def __init__(self, request_id: str, repository_id: str):
+    def __init__(self):
         """
         init for pull request
-        :param str request_id: the identifier for this request
-        :param str repository_id: the id of the repository this request belongs to
         """
         self.object_type: base.ObjectType = base.ObjectType.PULL_REQUEST
-        self.id: str = request_id
-        self.repository_id: str = repository_id
+        self.id: str = None
+        self.repository_id: str = None
         self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.author_association: str = None
         self.create_datetime: datetime = datetime.now()
@@ -94,13 +92,13 @@ class PullRequest:
         }
 
 
-class LoadPullRequestsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadPullRequestsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading pull requests from git's graphql interface
     """
 
     def requires(self):
-        return [repository.LoadRepositoriesTaskSingle(owner=self.owner, name=self.name)]
+        return [repository.LoadRepositoryPullRequestIdsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -109,51 +107,45 @@ class LoadPullRequestsTaskSingle(repository.GitSingleRepositoryTask, actor.GitAc
         """
         if self._get_expected_results() != self._get_actual_results():
             pull_requests_loaded: int = 0
-            pull_request_cursor: str = None
 
-            # continue executing gets against git until we have all the PRs
-            while self.repository.total_pull_requests > pull_requests_loaded:
-                logging.debug(f'running query for pull requests against {self.repository}')
-                query = self._pull_request_query(pull_request_cursor)
-                response_json = self.graph_ql_client.execute_query(query)
-                logging.debug(f'query complete for pull requests against {self.repository}')
+            for pull_request_id in self.repository.pull_request_ids:
 
-                # iterate over each pull request returned (we return 20 at a time)
-                for edge in response_json["data"]["repository"]["pullRequests"]["edges"]:
-                    pull_requests_loaded += 1
-                    pull_request_cursor = edge["cursor"]
-                    pull_request_id = edge["node"]["id"]
+                pull_requests_loaded += 1
 
-                    # check to see if pull request is in the database
-                    found_request = self._get_collection().find_one({'id': pull_request_id,
-                                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
-                    if found_request is None:
+                # check to see if pull request is in the database
+                found_request = self._get_collection().find_one({'id': pull_request_id,
+                                                                 'object_type': base.ObjectType.PULL_REQUEST.name})
+                if found_request is None:
+                    logging.debug(f'running query for pull request: [{pull_request_id}] against {self.repository}')
+                    query = self._pull_request_query(pull_request_id)
+                    response_json = self.graph_ql_client.execute_query(query)
+                    logging.debug(f'query complete for pull request: [{pull_request_id}] against {self.repository}')
 
-                        pr = PullRequest(pull_request_id, self.repository.id)
-                        pr.body_text = edge["node"]["bodyText"]
-                        pr.state = edge["node"]["state"]
+                    pr = PullRequest()
+                    pr.id = response_json["data"]["node"]["id"]
+                    pr.repository_id = response_json["data"]["node"]["repository"]["id"]
+                    pr.body_text = response_json["data"]["node"]["bodyText"]
+                    pr.state = response_json["data"]["node"]["state"]
 
-                        # load the counts
-                        pr.total_reviews = edge["node"]["reviews"]["totalCount"]
-                        pr.total_comments = edge["node"]["comments"]["totalCount"]
-                        pr.total_participants = edge["node"]["participants"]["totalCount"]
-                        pr.total_edits = edge["node"]["userContentEdits"]["totalCount"]
-                        pr.total_reactions = edge["node"]["reactions"]["totalCount"]
-                        pr.total_commits = edge["node"]["commits"]["totalCount"]
+                    # load the counts
+                    pr.total_reviews = response_json["data"]["node"]["reviews"]["totalCount"]
+                    pr.total_comments = response_json["data"]["node"]["comments"]["totalCount"]
+                    pr.total_participants = response_json["data"]["node"]["participants"]["totalCount"]
+                    pr.total_edits = response_json["data"]["node"]["userContentEdits"]["totalCount"]
+                    pr.total_reactions = response_json["data"]["node"]["reactions"]["totalCount"]
+                    pr.total_commits = response_json["data"]["node"]["commits"]["totalCount"]
 
-                        # author can be None.  Who knew?
-                        if edge["node"]["author"] is not None:
-                            pr.author = self._find_actor_by_login(edge["node"]["author"]["login"])
-                        pr.author_association = pr.author_login = edge["node"]["authorAssociation"]
+                    # author can be None.  Who knew?
+                    if response_json["data"]["node"]["author"] is not None:
+                        pr.author = self._find_actor_by_login(response_json["data"]["node"]["author"]["login"])
+                    pr.author_association = pr.author_login = response_json["data"]["node"]["authorAssociation"]
 
-                        # parse the datetime
-                        pr.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
+                    # parse the datetime
+                    pr.create_datetime = base.to_datetime_from_str(response_json["data"]["node"]["createdAt"])
 
-                        logging.debug(f'inserting record for {pr}')
-                        self._get_collection().insert_one(pr.to_dictionary())
-                        logging.debug(f'insert complete for {pr}')
-                    else:
-                        logging.debug(f'Pull Request [id: {pull_request_id}] already found in database')
+                    logging.debug(f'inserting record for {pr}')
+                    self._get_collection().insert_one(pr.to_dictionary())
+                    logging.debug(f'insert complete for {pr}')
 
                 logging.debug(
                     f'pull requests found for {self.repository} '
@@ -171,7 +163,7 @@ class LoadPullRequestsTaskSingle(repository.GitSingleRepositoryTask, actor.GitAc
         returns the expected count per repository
         :return: expected counts
         """
-        return self.repository.total_pull_requests
+        return len(self.repository.pull_request_ids)
 
     def _get_actual_results(self):
         """
@@ -180,56 +172,44 @@ class LoadPullRequestsTaskSingle(repository.GitSingleRepositoryTask, actor.GitAc
         """
         return self._get_objects_saved_count(self.repository, base.ObjectType.PULL_REQUEST)
 
-    def _pull_request_query(self, pull_request_cursor: str) -> str:
-        """
-        creates a graphql query for the pull requests within a specific repository - asks for 100 PRs a time
-        :param pull_request_cursor: the cursor that indicates where to records were loaded until
-        :return: the query string
-        """
+    @staticmethod
+    def _pull_request_query(pull_request_id: str) -> str:
+        # static method for getting the query for all the fields for a pull request
 
-        after = ''
-        if pull_request_cursor:
-            after = 'after:"' + pull_request_cursor + '", '
-
-        # todo configure states dynamically.
         query = """
         {
-          repository(name:\"""" + self.repository.name + """\", owner:\"""" + self.repository.owner + """\") {
-            id
-            pullRequests (first: 100, """ + after + """states: MERGED) { 
-              totalCount 
-              edges { 
-                cursor 
-                node { 
-                  id 
-                  createdAt 
-                  bodyText
-                  author { 
-                    login 
-                  } 
-                  authorAssociation 
-                  participants (first:1) {
-                    totalCount
-                  }
-                  comments(first:1) {
-                    totalCount
-                  }
-                  reviews(first:1) {
-                    totalCount
-                  }
-                  userContentEdits(first:1) {
-                    totalCount
-                  }
-                  reactions(first:1) {
-                      totalCount
-                  } 
-                  commits(first: 1) {
-                    totalCount
-                  }
-                  state
-                } 
+          node(id: \"""" + pull_request_id + """\") {
+            ... on PullRequest { 
+              id 
+              repository {
+                id
+              }
+              createdAt 
+              bodyText
+              author { 
+                login 
               } 
-            }      
+              authorAssociation 
+              participants (first:1) {
+                totalCount
+              }
+              comments(first:1) {
+                totalCount
+              }
+              reviews(first:1) {
+                totalCount
+              }
+              userContentEdits(first:1) {
+                totalCount
+              }
+              reactions(first:1) {
+                  totalCount
+              } 
+              commits(first: 1) {
+                totalCount
+              }
+              state
+            }
           }
         }
         """
@@ -239,13 +219,13 @@ class LoadPullRequestsTaskSingle(repository.GitSingleRepositoryTask, actor.GitAc
         luigi.run()
 
 
-class LoadParticipantsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadParticipantIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading participants from the stored pull requests
     """
 
     def requires(self):
-        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
 
     def _get_expected_results(self):
         """
@@ -352,13 +332,13 @@ class LoadParticipantsTaskSingle(repository.GitSingleRepositoryTask, actor.GitAc
         luigi.run()
 
 
-class LoadCommitIdsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadCommitIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading commits from the stored pull requests
     """
 
     def requires(self):
-        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
 
     def _get_expected_results(self):
         """
@@ -505,7 +485,7 @@ class LoadEditsTask(content.GitSingleMongoEditsTask):
         self.object_type = base.ObjectType.PULL_REQUEST
 
     def requires(self):
-        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -562,7 +542,7 @@ class LoadReactionsTask(content.GitSingleMongoReactionsTask):
         self.object_type = base.ObjectType.PULL_REQUEST
 
     def requires(self):
-        return [LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

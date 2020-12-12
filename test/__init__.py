@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 import json
+import logging
 from datetime import timedelta, datetime
 
 import pymongo
@@ -43,11 +44,13 @@ class CaseSetup:
 
     def callback(self, request: requests.Request, context):
         request_json = json.dumps(request.json())
-        print(request_json)
+        logging.debug(f'[request] {request_json}')
         for key in self.matchers.keys():
             if key in request_json:
+                logging.debug(f'[request] {request_json} [matched] {self.matchers[key]}')
                 return self.matchers[key]
         # no matcher matched
+        logging.error(f'[request - NOTHING matched] {request_json}')
         context.status_code = 404
         return ''
 

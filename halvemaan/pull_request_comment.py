@@ -70,13 +70,13 @@ class PullRequestComment(content.Comment):
         }
 
 
-class LoadCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, repository.GitRepositoryCountMixin):
+class LoadCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading comments for the stored pull requests
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTaskSingle(owner=self.owner, name=self.name)]
+        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -242,7 +242,7 @@ class LoadCommentEditsTask(content.GitSingleMongoEditsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_COMMENT
 
     def requires(self):
-        return [LoadCommentsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadCommentsTask(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -299,7 +299,7 @@ class LoadCommentReactionsTask(content.GitSingleMongoReactionsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_COMMENT
 
     def requires(self):
-        return [LoadCommentsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadCommentsTask(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

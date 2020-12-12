@@ -331,7 +331,8 @@ class LoadRepositoryPullRequestIdsTask(GitSingleRepositoryTask):
         returns the actual count per repository
         :return: expected counts
         """
-        return len(self.repository.pull_request_ids)
+        updated_repository = self._get_repository_by_id(self.repository.id)
+        return len(updated_repository.pull_request_ids)
 
     def _pull_request_query(self, pull_request_cursor: str) -> str:
         """

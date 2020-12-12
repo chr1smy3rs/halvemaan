@@ -93,8 +93,12 @@ class GitMongoTask(luigi.Task, metaclass=abc.ABCMeta):
         :return: True if the pull request counts are the same
         """
         for item in self.requires():
+            status = item.run_successful()
+            logging.debug(f'{item} - {status}')
             if not item.run_successful():
                 return False
+
+        logging.debug(f'{self}: {self._get_expected_results()} - {self._get_actual_results()}')
 
         if self._get_expected_results() != self._get_actual_results():
             return False

@@ -370,7 +370,7 @@ class LoadCommitsTask(GitSingleCommitsTask):
         self.object_type = base.ObjectType.PULL_REQUEST
 
     def requires(self):
-        return [pull_request.LoadCommitIdsTaskSingle(owner=self.owner, name=self.name)]
+        return [pull_request.LoadCommitIdsTask(owner=self.owner, name=self.name)]
 
     def _find_unsaved_commits(self) -> [str]:
         """
@@ -393,7 +393,7 @@ class LoadReviewCommitsTask(GitSingleCommitsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW
 
     def requires(self):
-        return [pull_request_review.LoadReviewsTaskSingle(owner=self.owner, name=self.name)]
+        return [pull_request_review.LoadReviewsTask(owner=self.owner, name=self.name)]
 
     def _find_unsaved_commits(self) -> [str]:
         """
@@ -416,7 +416,7 @@ class LoadReviewCommentCommitsTask(GitSingleCommitsTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW_COMMENT
 
     def requires(self):
-        return [pull_request_review_comment.LoadReviewCommentsTaskSingle(owner=self.owner, name=self.name)]
+        return [pull_request_review_comment.LoadReviewCommentsTask(owner=self.owner, name=self.name)]
 
     def _find_unsaved_commits(self) -> [str]:
         """
@@ -429,8 +429,7 @@ class LoadReviewCommentCommitsTask(GitSingleCommitsTask):
         luigi.run()
 
 
-class LoadCommitPullRequestIdsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
-                                         repository.GitRepositoryCountMixin):
+class LoadCommitPullRequestIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading pull request ids for saved commits
     """
@@ -544,8 +543,7 @@ class LoadCommitPullRequestIdsTaskSingle(repository.GitSingleRepositoryTask, act
         luigi.run()
 
 
-class LoadCommitActorIdsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
-                                   repository.GitRepositoryCountMixin):
+class LoadCommitActorIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading author ids for saved commits
     """

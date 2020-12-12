@@ -72,8 +72,7 @@ class CommitComment(content.Comment):
         }
 
 
-class LoadCommitCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
-                                   repository.GitRepositoryCountMixin):
+class LoadCommitCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading comment ids for saved commits
     """

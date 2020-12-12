@@ -103,10 +103,8 @@ class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
         m.post('http://graphql.mock.com', text=case_setup.callback)
 
         case_setup.load_data()
-
-        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='test_owner',
-                                                                          name='test_one_pull_request')],
-                             local_scheduler=True)
+        task = repository.LoadRepositoryPullRequestIdsTask(owner='test_owner', name='test_one_pull_request')
+        result = luigi.build([task], local_scheduler=True)
         self.assertEqual(True, result)
         count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '555555'})
         self.assertEqual(1, count)

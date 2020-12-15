@@ -94,5 +94,50 @@
       "total_pull_requests":1,
       "pull_request_ids": ["999999"]
     }]
-  }
+  },
+  "one_pull_request_inserted": {
+      "matchers": [
+      {
+        "match": "repository(name:",
+        "response" : {
+                "data": {
+                  "repository": {
+                    "id": "777771",
+                    "owner": {
+                      "id": "222222",
+                      "login": "test_owner"
+                    },
+                    "name": "test_one_pull_request_inserted",
+                    "pullRequests": {
+                      "totalCount": 1
+                    }
+                  }
+                }
+              }
+      }],
+      "data": [{
+        "type": "REPOSITORY",
+        "id": "777771",
+        "owner_login": "test_owner",
+        "owner_id": "222222",
+        "owner_type": "ORGANIZATION",
+        "name": "test_one_pull_request_inserted",
+        "total_pull_requests":1,
+        "pull_request_ids": ["999991"]
+      },{
+        "type": "PULL_REQUEST",
+        "id": "999991",
+        "repository_id": "777771",
+        "author_id": "333331",
+        "author_type": "USER",
+        "author_association": "CONTRIBUTOR",
+        "body_text": "test PR",
+        "total_participants":1,
+        "total_comments":1,
+        "total_reviews":1,
+        "total_commits":1,
+        "total_reactions":1,
+        "state": "MERGED"
+      }]
+    }
 }

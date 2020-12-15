@@ -60,8 +60,10 @@ class LoadRepositoryTaskTestCase(unittest.TestCase):
         case_setup.load_data()
 
         result = luigi.build([repository.LoadRepositoryTask(owner='test_owner', name='test_one_record')],
-                             local_scheduler=True)
-        self.assertEqual(True, result)
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue('Scheduled 1 tasks of which' in result.summary_text)
+        self.assertTrue('1 complete ones were encountered' in result.summary_text)
+        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
         count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '333333'})
         self.assertEqual(1, count)
         returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '333333'})
@@ -81,8 +83,11 @@ class LoadRepositoryTaskTestCase(unittest.TestCase):
         case_setup.load_data()
 
         result = luigi.build([repository.LoadRepositoryTask(owner='test_owner', name='test_mismatch')],
-                             local_scheduler=True)
-        self.assertEqual(True, result)
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue('Scheduled 1 tasks of which' in result.summary_text)
+        self.assertTrue('1 ran successfully' in result.summary_text)
+        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
+        self.assertEqual(result.status, luigi.LuigiStatusCode.SUCCESS)
         count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '444444'})
         self.assertEqual(1, count)
         returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '444444'})
@@ -103,9 +108,15 @@ class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
         m.post('http://graphql.mock.com', text=case_setup.callback)
 
         case_setup.load_data()
-        task = repository.LoadRepositoryPullRequestIdsTask(owner='test_owner', name='test_one_pull_request')
-        result = luigi.build([task], local_scheduler=True)
-        self.assertEqual(True, result)
+        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='test_owner',
+                                                                          name='test_one_pull_request')],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue('Scheduled 2 tasks of which' in result.summary_text)
+        self.assertTrue('1 complete ones were encountered' in result.summary_text)
+        self.assertTrue('1 ran successfully' in result.summary_text)
+        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
+        self.assertEqual(result.status, luigi.LuigiStatusCode.SUCCESS)
+
         count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '555555'})
         self.assertEqual(1, count)
         returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '555555'})
@@ -126,8 +137,11 @@ class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
 
         result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='test_owner',
                                                                           name='test_one_pull_request_match')],
-                             local_scheduler=True)
-        self.assertEqual(True, result)
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue('Scheduled 1 tasks of which' in result.summary_text)
+        self.assertTrue('1 complete ones were encountered' in result.summary_text)
+        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
+        self.assertEqual(result.status, luigi.LuigiStatusCode.SUCCESS)
         count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '777777'})
         self.assertEqual(1, count)
         returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '777777'})

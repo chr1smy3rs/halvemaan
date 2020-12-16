@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import configparser
 import json
 import logging
 from datetime import timedelta, datetime
@@ -26,100 +27,43 @@ from halvemaan import actor, repository, pull_request
 
 class CaseSetup:
 
-    def __init__(self, class_code: str, case_code: str):
-        json_file = open(f'setup/{class_code}.json')
-        class_json = json.load(json_file)
-        json_file.close()
-        self.case_json = class_json[case_code]
+    def __init__(self):
+        """ init for test case setup """
+        config = configparser.ConfigParser()
+        config.read('luigi.cfg')
 
-        # load request match and corresponding response
-        self.matchers: {str: str} = {}
-        for item in self.case_json["matchers"]:
-            self.matchers[item['match']] = json.dumps(item['response'])
+        # build the pymongo client
+        client = pymongo.MongoClient(config['HalvemaanConfig']['mongo_url'])
+        mongo_index = client[config['HalvemaanConfig']['mongo_index']]
+        self.mongo_collection = mongo_index[config['HalvemaanConfig']['mongo_collection']]
 
-        # create the mongo collection
-        client = pymongo.MongoClient('mongodb://mongo.mock.com:27017/biasSandbox')
-        mongo_index = client['biasSandbox']
-        self.mongo_collection = mongo_index['devRawData']
-
-    def callback(self, request: requests.Request, context):
-        request_json = json.dumps(request.json())
-        logging.debug(f'[request] {request_json}')
-        for key in self.matchers.keys():
-            if key in request_json:
-                logging.debug(f'[request] {request_json} [matched] {self.matchers[key]}')
-                return self.matchers[key]
-        # no matcher matched
-        logging.error(f'[request - NOTHING matched] {request_json}')
-        context.status_code = 404
-        return ''
-
-    def load_data(self):
-        if "data" in self.case_json.keys():
-            for item in self.case_json["data"]:
-                if item["type"] == "REPOSITORY":
-                    test_repo = CaseSetup.parse_repository(item)
-                    self.get_mongo_collection().insert_one(test_repo.to_dictionary())
-                elif item["type"] == "PULL_REQUEST":
-                    test_pr = CaseSetup.parse_pull_request(item)
-                    self.get_mongo_collection().insert_one(test_pr.to_dictionary())
-
-    def get_mongo_collection(self):
-        return self.mongo_collection
+    def cleanup_database(self):
+        """ cleans up the database prior to running a test case """
+        self.mongo_collection.delete_many({})
 
     @staticmethod
-    def parse_repository(repository_json):
+    def validate_result(luigi_result, total_tasks=0, successful_tasks=0, complete_tasks=0) -> bool:
+        result = True
 
-        # create a timestamp in the past
+        total_string = f'Scheduled {total_tasks} tasks of which'
+        result = result and total_string in luigi_result.summary_text
+
+        if successful_tasks > 0:
+            success_string = f'{successful_tasks} ran successfully'
+            result = result and success_string in luigi_result.summary_text
+
+        if complete_tasks > 0:
+            complete_string = f'{complete_tasks} complete ones were encountered'
+            result = result and complete_string in luigi_result.summary_text
+
+        result = result and 'no failed tasks or missing dependencies' in luigi_result.summary_text
+
+        return result
+
+    @staticmethod
+    def get_old_timestamp():
+        """ create a timestamp in the past """
         ten_minutes = timedelta(minutes=10)
         timestamp = datetime.now() - ten_minutes
         timestamp = timestamp.replace(microsecond=0)
-
-        test_repo = repository.Repository()
-        test_repo.id = repository_json['id']
-        test_repo.owner_login = repository_json['owner_login']
-        test_repo.name = repository_json['name']
-        test_repo.total_pull_requests = repository_json['total_pull_requests']
-        test_repo.insert_datetime = timestamp
-        test_repo.update_datetime = timestamp
-
-        if "pull_request_ids" in repository_json:
-            test_repo.pull_request_ids = repository_json["pull_request_ids"]
-
-        # build the actor
-        test_repo.owner = actor.Actor(repository_json['owner_login'],
-                                      CaseSetup.get_actor_type(repository_json['owner_type']))
-        return test_repo
-
-    @staticmethod
-    def parse_pull_request(pull_request_json):
-
-        # create a timestamp in the past
-        ten_minutes = timedelta(minutes=10)
-        timestamp = datetime.now() - ten_minutes
-        timestamp = timestamp.replace(microsecond=0)
-
-        test_pr = pull_request.PullRequest()
-        test_pr.id = pull_request_json['id']
-        test_pr.repository_id = pull_request_json['repository_id']
-        test_pr.body_text = pull_request_json['body_text']
-        test_pr.insert_datetime = timestamp
-        test_pr.total_participants = pull_request_json['total_participants']
-        test_pr.total_comments = pull_request_json['total_comments']
-        test_pr.total_commits = pull_request_json['total_commits']
-        test_pr.total_reactions = pull_request_json['total_reactions']
-        test_pr.state = pull_request_json['state']
-
-        # build the actor
-        test_pr.author = actor.Actor(pull_request_json['author_id'],
-                                    CaseSetup.get_actor_type(pull_request_json['author_type']))
-        test_pr.author_association = pull_request_json['author_association']
-
-        return test_pr
-
-    @staticmethod
-    def get_actor_type(type_str: str) -> actor.ActorType:
-        for actor_type in actor.ActorType:
-            if type_str == actor_type.name:
-                return actor_type
-        return actor.ActorType.UNKNOWN
+        return timestamp

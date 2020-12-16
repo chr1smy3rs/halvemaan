@@ -143,3 +143,5 @@ cython_debug/
 /output/
 
 /local/
+/test/luigi.cfg
+/test/logging.cfg

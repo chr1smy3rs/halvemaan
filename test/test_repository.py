@@ -17,8 +17,6 @@
 import unittest
 
 import luigi
-import mongomock as mongomock
-import requests_mock
 
 from halvemaan import repository, base
 from test import CaseSetup
@@ -27,127 +25,91 @@ from test import CaseSetup
 class LoadRepositoryTaskTestCase(unittest.TestCase):
     """ Tests the loading of initial repository data into the mongo database """
 
-    @requests_mock.Mocker()
-    @mongomock.patch(servers=(('mongo.mock.com', 27017),))
-    def test_no_record_in_database(self, m):
+    def setUp(self) -> None:
+        case_setup = CaseSetup()
+        case_setup.cleanup_database()
 
-        case_setup = CaseSetup('load_repository', 'no_record')
-        mongo_collection = case_setup.get_mongo_collection()
+    def test_no_record_in_database(self):
+        """ checks for insert when no record has in database """
+        case_setup = CaseSetup()
 
-        m.post('http://graphql.mock.com', text=case_setup.callback)
-
-        case_setup.load_data()
-
-        result = luigi.build([repository.LoadRepositoryTask(owner='test_owner', name='test_no_record')],
-                             local_scheduler=True)
-        self.assertEqual(True, result)
-
-        count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '111111'})
-        self.assertEqual(1, count)
-        returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '111111'})
-        self.assertEqual('111111', returned_repo['id'])
-        self.assertEqual(1, returned_repo['total_pull_requests'])
-
-    @requests_mock.Mocker()
-    @mongomock.patch(servers=(('mongo.mock.com', 27017),))
-    def test_one_record_counts_match(self, m):
-
-        case_setup = CaseSetup('load_repository', 'one_record_counts_match')
-        mongo_collection = case_setup.get_mongo_collection()
-
-        m.post('http://graphql.mock.com', text=case_setup.callback)
-
-        case_setup.load_data()
-
-        result = luigi.build([repository.LoadRepositoryTask(owner='test_owner', name='test_one_record')],
+        result = luigi.build([repository.LoadRepositoryTask(owner='mockito', name='mockito')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue('Scheduled 1 tasks of which' in result.summary_text)
-        self.assertTrue('1 complete ones were encountered' in result.summary_text)
-        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
-        count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '333333'})
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
+        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertEqual(1, count)
-        returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '333333'})
-        self.assertEqual('333333', returned_repo['id'])
-        self.assertEqual(2, returned_repo['total_pull_requests'])
-        self.assertEqual(returned_repo['insert_timestamp'], returned_repo['update_timestamp'])
 
-    @requests_mock.Mocker()
-    @mongomock.patch(servers=(('mongo.mock.com', 27017),))
-    def test_one_record_counts_mismatch(self, m):
+    def test_record_in_database(self):
+        """ checks that overwrites do not occur when counts match up """
+        case_setup = CaseSetup()
 
-        case_setup = CaseSetup('load_repository', 'one_record_counts_mismatch')
-        mongo_collection = case_setup.get_mongo_collection()
-
-        m.post('http://graphql.mock.com', text=case_setup.callback)
-
-        case_setup.load_data()
-
-        result = luigi.build([repository.LoadRepositoryTask(owner='test_owner', name='test_mismatch')],
+        result = luigi.build([repository.LoadRepositoryTask(owner='junit-team', name='junit4')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue('Scheduled 1 tasks of which' in result.summary_text)
-        self.assertTrue('1 ran successfully' in result.summary_text)
-        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
-        self.assertEqual(result.status, luigi.LuigiStatusCode.SUCCESS)
-        count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '444444'})
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
+
+        result = luigi.build([repository.LoadRepositoryTask(owner='junit-team', name='junit4')],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
+
+        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertEqual(1, count)
-        returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '444444'})
-        self.assertEqual('444444', returned_repo['id'])
-        self.assertEqual(3, returned_repo['total_pull_requests'])
+
+    def test_record_in_database_counts_mismatch(self):
+        """ checks for updates when the pull request counts do not match """
+        case_setup = CaseSetup()
+
+        task = repository.LoadRepositoryTask(owner='junit-team', name='junit5')
+        result = luigi.build([task],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
+
+        # update the repo to only one pull request
+        saved_repository = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
+        timestamp = CaseSetup.get_old_timestamp()
+        set_dictionary = {'total_pull_requests': 1, 'insert_timestamp': timestamp, 'update_timestamp': timestamp}
+        case_setup.mongo_collection.update_one({'id': saved_repository['id']}, {'$set': set_dictionary})
+
+        result = luigi.build([repository.LoadRepositoryTask(owner='junit-team', name='junit5')],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
+
+        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
+        self.assertEqual(1, count)
+        saved_repository = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
+        self.assertTrue(saved_repository['total_pull_requests'] > 1)
+        self.assertNotEqual(saved_repository['insert_timestamp'], saved_repository['update_timestamp'])
 
 
 class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
-    """ Tests the loading of pull request ids for stored repository data into the mongo database """
 
-    @requests_mock.Mocker()
-    @mongomock.patch(servers=(('mongo.mock.com', 27017),))
-    def test_one_record_counts_mismatch(self, m):
+    def setUp(self) -> None:
+        case_setup = CaseSetup()
+        case_setup.cleanup_database()
 
-        case_setup = CaseSetup('load_pull_request_ids', 'one_record_counts_mismatch')
-        mongo_collection = case_setup.get_mongo_collection()
+    def test_no_record_in_database(self):
+        """ checks for insert when no record is in database """
+        case_setup = CaseSetup()
 
-        m.post('http://graphql.mock.com', text=case_setup.callback)
-
-        case_setup.load_data()
-        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='test_owner',
-                                                                          name='test_one_pull_request')],
+        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='junit-team', name='junit5-samples')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue('Scheduled 2 tasks of which' in result.summary_text)
-        self.assertTrue('1 complete ones were encountered' in result.summary_text)
-        self.assertTrue('1 ran successfully' in result.summary_text)
-        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
-        self.assertEqual(result.status, luigi.LuigiStatusCode.SUCCESS)
-
-        count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '555555'})
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=2))
+        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertEqual(1, count)
-        returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '555555'})
-        self.assertEqual('555555', returned_repo['id'])
-        self.assertEqual(1, returned_repo['total_pull_requests'])
-        self.assertEqual(1, len(returned_repo['pull_request_ids']))
 
-    @requests_mock.Mocker()
-    @mongomock.patch(servers=(('mongo.mock.com', 27017),))
-    def test_one_record_counts_match(self, m):
+    def test_record_in_database(self):
+        """ checks for insert when record is in database """
+        case_setup = CaseSetup()
 
-        case_setup = CaseSetup('load_pull_request_ids', 'one_record_counts_match')
-        mongo_collection = case_setup.get_mongo_collection()
-
-        m.post('http://graphql.mock.com', text=case_setup.callback)
-
-        case_setup.load_data()
-
-        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='test_owner',
-                                                                          name='test_one_pull_request_match')],
+        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='junit-team', name='junit.contrib')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue('Scheduled 1 tasks of which' in result.summary_text)
-        self.assertTrue('1 complete ones were encountered' in result.summary_text)
-        self.assertTrue('no failed tasks or missing dependencies' in result.summary_text)
-        self.assertEqual(result.status, luigi.LuigiStatusCode.SUCCESS)
-        count: int = mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name, 'id': '777777'})
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=2))
+
+        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='junit-team', name='junit.contrib ')],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
+
+        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertEqual(1, count)
-        returned_repo = mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name, 'id': '777777'})
-        self.assertEqual('777777', returned_repo['id'])
-        self.assertEqual(1, returned_repo['total_pull_requests'])
-        self.assertEqual(1, len(returned_repo['pull_request_ids']))
 
 
 if __name__ == '__main__':

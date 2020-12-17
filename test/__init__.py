@@ -15,14 +15,9 @@
 # limitations under the License.
 #
 import configparser
-import json
-import logging
 from datetime import timedelta, datetime
 
 import pymongo
-import requests
-
-from halvemaan import actor, repository, pull_request
 
 
 class CaseSetup:

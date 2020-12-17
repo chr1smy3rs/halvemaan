@@ -332,6 +332,118 @@ class LoadParticipantIdsTask(repository.GitSingleRepositoryTask, actor.GitActorL
         luigi.run()
 
 
+class LoadReviewIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
+    """
+    Task for loading review ids from the stored pull requests
+    """
+
+    def requires(self):
+        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
+
+    def _get_expected_results(self):
+        """
+        returns the expected count per repository
+        :return: expected counts
+        """
+        logging.debug(f'running count query for expected reviews for pull requests against {self.repository}')
+        pull_requests = self._get_collection().find({'repository_id': self.repository.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
+        expected_count: int = 0
+        for pull_request in pull_requests:
+            expected_count += pull_request['total_reviews']
+        logging.debug(f'count query complete for expected reviews for pull requests against {self.repository}')
+        return expected_count
+
+    def _get_actual_results(self):
+        """
+        returns the actual count per repository
+        :return: expected counts
+        """
+        logging.debug(f'running count query for actual reviews for pull requests against {self.repository}')
+        pull_requests = self._get_collection().find({'repository_id': self.repository.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
+        actual_count: int = 0
+        for pull_request in pull_requests:
+            actual_count += len(pull_request['review_ids'])
+        logging.debug(f'count query complete for actual reviews for pull requests against {self.repository}')
+        return actual_count
+
+    def run(self):
+        """
+        loads the review ids for the pull requests for a specific repository
+        :return: None
+        """
+        pull_request_reviewed: int = 0
+
+        pull_request_count = self._get_objects_saved_count(self.repository, base.ObjectType.PULL_REQUEST)
+
+        pull_requests = self._get_collection().find({'repository_id': self.repository.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
+        for pull_request in pull_requests:
+            pull_request_id: str = pull_request['id']
+            reviews_expected: int = pull_request['total_reviews']
+            reviews = []
+            review_cursor: str = None
+            pull_request_reviewed += 1
+
+            if reviews_expected > len(pull_request['review_ids']):
+                while reviews_expected > len(reviews):
+                    logging.debug(
+                        f'running query for reviews for pull request [{pull_request_id}] against {self.repository}'
+                    )
+                    query = self._pull_requests_review_ids_query(pull_request_id, review_cursor)
+                    response_json = self.graph_ql_client.execute_query(query)
+                    logging.debug(
+                        f'query complete for reviews for pull request [{pull_request_id}] '
+                        f'against {self.repository}'
+                    )
+
+                    # iterate over each participant returned (we return 100 at a time)
+                    for edge in response_json["data"]["node"]["reviews"]["edges"]:
+                        review_cursor = edge["cursor"]
+                        reviews.append(edge["node"]["id"])
+
+                self._get_collection().update_one({'id': pull_request_id},
+                                                  {'$set': {'review_ids': reviews}})
+
+            logging.debug(f'pull requests reviewed for {self.repository} {pull_request_reviewed}/{pull_request_count}')
+
+        actual_count: int = self._get_actual_results()
+        expected_count: int = self._get_expected_results()
+        logging.debug(
+            f'participants returned for {self.repository} returned: [{actual_count}], expected: [{expected_count}]'
+        )
+
+    @staticmethod
+    def _pull_requests_review_ids_query(pull_request_id: str, review_cursor: str) -> str:
+        # static method for getting the query for all the reviews for a pull request
+
+        after = ''
+        if review_cursor:
+            after = ', after:"' + review_cursor + '", '
+
+        query = """
+        {
+          node(id: \"""" + pull_request_id + """\") {
+            ... on PullRequest {
+              reviews (first:100""" + after + """) {
+                edges {
+                  cursor
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        return query
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
 class LoadCommitIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading commits from the stored pull requests

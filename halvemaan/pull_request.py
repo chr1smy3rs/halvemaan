@@ -112,40 +112,7 @@ class LoadPullRequestsTask(repository.GitSingleRepositoryTask, actor.GitActorLoo
 
                 pull_requests_loaded += 1
 
-                # check to see if pull request is in the database
-                found_request = self._get_collection().find_one({'id': pull_request_id,
-                                                                 'object_type': base.ObjectType.PULL_REQUEST.name})
-                if found_request is None:
-                    logging.debug(f'running query for pull request: [{pull_request_id}] against {self.repository}')
-                    query = self._pull_request_query(pull_request_id)
-                    response_json = self.graph_ql_client.execute_query(query)
-                    logging.debug(f'query complete for pull request: [{pull_request_id}] against {self.repository}')
-
-                    pr = PullRequest()
-                    pr.id = response_json["data"]["node"]["id"]
-                    pr.repository_id = response_json["data"]["node"]["repository"]["id"]
-                    pr.body_text = response_json["data"]["node"]["bodyText"]
-                    pr.state = response_json["data"]["node"]["state"]
-
-                    # load the counts
-                    pr.total_reviews = response_json["data"]["node"]["reviews"]["totalCount"]
-                    pr.total_comments = response_json["data"]["node"]["comments"]["totalCount"]
-                    pr.total_participants = response_json["data"]["node"]["participants"]["totalCount"]
-                    pr.total_edits = response_json["data"]["node"]["userContentEdits"]["totalCount"]
-                    pr.total_reactions = response_json["data"]["node"]["reactions"]["totalCount"]
-                    pr.total_commits = response_json["data"]["node"]["commits"]["totalCount"]
-
-                    # author can be None.  Who knew?
-                    if response_json["data"]["node"]["author"] is not None:
-                        pr.author = self._find_actor_by_login(response_json["data"]["node"]["author"]["login"])
-                    pr.author_association = pr.author_login = response_json["data"]["node"]["authorAssociation"]
-
-                    # parse the datetime
-                    pr.create_datetime = base.to_datetime_from_str(response_json["data"]["node"]["createdAt"])
-
-                    logging.debug(f'inserting record for {pr}')
-                    self._get_collection().insert_one(pr.to_dictionary())
-                    logging.debug(f'insert complete for {pr}')
+                self._build_and_insert_pull_request(pull_request_id)
 
                 logging.debug(
                     f'pull requests found for {self.repository} '
@@ -157,6 +124,42 @@ class LoadPullRequestsTask(repository.GitSingleRepositoryTask, actor.GitActorLoo
                 f'pull requests returned for {self.repository} returned: [{actual_count}], '
                 f'expected: [{self.repository.total_pull_requests}]'
             )
+
+    def _build_and_insert_pull_request(self, pull_request_id):
+        # check to see if pull request is in the database
+        found_request = self._get_collection().find_one({'id': pull_request_id,
+                                                         'object_type': base.ObjectType.PULL_REQUEST.name})
+        if found_request is None:
+            logging.debug(f'running query for pull request: [{pull_request_id}] against {self.repository}')
+            query = self._pull_request_query(pull_request_id)
+            response_json = self.graph_ql_client.execute_query(query)
+            logging.debug(f'query complete for pull request: [{pull_request_id}] against {self.repository}')
+
+            pr = PullRequest()
+            pr.id = response_json["data"]["node"]["id"]
+            pr.repository_id = response_json["data"]["node"]["repository"]["id"]
+            pr.body_text = response_json["data"]["node"]["bodyText"]
+            pr.state = response_json["data"]["node"]["state"]
+
+            # load the counts
+            pr.total_reviews = response_json["data"]["node"]["reviews"]["totalCount"]
+            pr.total_comments = response_json["data"]["node"]["comments"]["totalCount"]
+            pr.total_participants = response_json["data"]["node"]["participants"]["totalCount"]
+            pr.total_edits = response_json["data"]["node"]["userContentEdits"]["totalCount"]
+            pr.total_reactions = response_json["data"]["node"]["reactions"]["totalCount"]
+            pr.total_commits = response_json["data"]["node"]["commits"]["totalCount"]
+
+            # author can be None.  Who knew?
+            if response_json["data"]["node"]["author"] is not None:
+                pr.author = self._find_actor_by_login(response_json["data"]["node"]["author"]["login"])
+            pr.author_association = pr.author_login = response_json["data"]["node"]["authorAssociation"]
+
+            # parse the datetime
+            pr.create_datetime = base.to_datetime_from_str(response_json["data"]["node"]["createdAt"])
+
+            logging.debug(f'inserting record for {pr}')
+            self._get_collection().insert_one(pr.to_dictionary())
+            logging.debug(f'insert complete for {pr}')
 
     def _get_expected_results(self):
         """

@@ -27,15 +27,13 @@ luigi.auto_namespace(scope=__name__)
 class PullRequestReview:
     """ contains the data for a review on a pull request """
 
-    def __init__(self, review_id: str, pull_request_id: str):
+    def __init__(self):
         """
         init for a review of a pull request
-        :param str review_id: the identifier for the pull request
-        :param PullRequest pr: the pull request this review pertains to
         """
         self.object_type: base.ObjectType = base.ObjectType.PULL_REQUEST_REVIEW
-        self.id: str = review_id
-        self.pull_request_id: str = pull_request_id
+        self.id: str = None
+        self.pull_request_id: str = None
         self.repository_id: str = None
         self.author: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.author_association: str = ''
@@ -96,7 +94,7 @@ class LoadReviewsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMi
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [pull_request.LoadReviewIdsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -110,58 +108,52 @@ class LoadReviewsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMi
         pull_requests = self._get_collection().find({'repository_id': self.repository.id,
                                                      'object_type': base.ObjectType.PULL_REQUEST.name})
         for pr in pull_requests:
-            pull_request_id: str = pr['id']
-            reviews_expected: int = pr['total_reviews']
-            review_ids: [str] = []
-            review_cursor: str = None
             pull_request_reviewed += 1
 
-            while reviews_expected > self._get_actual_reviews(pull_request_id):
+            reviews_reviewed = 0
+            for review_id in pr['review_ids']:
+                reviews_reviewed += 1
+                self._build_and_insert_pull_request_review(review_id)
                 logging.debug(
-                    f'running query for reviews for pull request [{pull_request_id}] against {self.repository}'
-                )
-                query = self._pull_request_reviews_query(pull_request_id, review_cursor)
-                response_json = self.graph_ql_client.execute_query(query)
-                logging.debug(
-                    f'query complete for reviews for pull request [{pull_request_id}] against {self.repository}'
-                )
-
-                # iterate over each review returned (we return 100 at a time)
-                for edge in response_json["data"]["node"]["reviews"]["edges"]:
-
-                    review_cursor = edge["cursor"]
-                    review = PullRequestReview(edge["node"]["id"], pull_request_id)
-                    review_ids.append(review.id)
-                    review.repository_id = self.repository.id
-                    review.body_text = edge["node"]["bodyText"]
-                    review.commit_id = edge["node"]["commit"]["id"]
-                    review.total_comments = edge["node"]["comments"]["totalCount"]
-                    review.total_edits = edge["node"]["userContentEdits"]["totalCount"]
-                    review.total_reactions = edge["node"]["reactions"]["totalCount"]
-                    review.total_for_teams = edge["node"]["onBehalfOf"]["totalCount"]
-                    review.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
-                    review.state = edge["node"]["state"]
-
-                    # author can be None.  Who knew?
-                    if edge["node"]["author"] is not None:
-                        review.author = self._find_actor_by_login(edge["node"]["author"]["login"])
-                    review.author_association = edge["node"]["authorAssociation"]
-
-                    # check to see if pull request review is in the database
-                    found_request = self._get_collection().find_one({'id': review.id,
-                                                                    'object_type': 'PULL_REQUEST_REVIEW'})
-                    if found_request is None:
-                        self._get_collection().insert_one(review.to_dictionary())
-
-                self._get_collection().update_one({'id': pull_request_id},
-                                                  {'$set': {'review_ids': review_ids}})
-
+                    f'reviews reviewed for pull request: [id:{pr["id"]}, repository: {self.repository}] '
+                    f'{reviews_reviewed}/{len(pr["review_ids"])}')
             logging.debug(f'pull requests reviewed for {self.repository} {pull_request_reviewed}/{pull_request_count}')
 
         actual_count: int = self._get_actual_results()
         expected_count: int = self._get_expected_results()
         logging.debug(f'reviews returned for {self.repository} '
                       f'returned: [{actual_count}], expected: [{expected_count}]')
+
+    def _build_and_insert_pull_request_review(self, pull_request_review_id):
+        # check to see if pull request review is in the database
+        found_request = self._get_collection().find_one({'id': pull_request_review_id,
+                                                         'object_type': 'PULL_REQUEST_REVIEW'})
+        if found_request is None:
+            logging.debug(f'running query for review for id [{pull_request_review_id}] against {self.repository}')
+            query = self._pull_request_reviews_query(pull_request_review_id)
+            response_json = self.graph_ql_client.execute_query(query)
+            logging.debug(
+                f'query complete for reviews for pull request [{pull_request_review_id}] against {self.repository}'
+            )
+
+            edge = response_json["data"]
+            review = PullRequestReview()
+            review.id = edge["node"]["id"]
+            review.pull_request_id = edge["node"]["pullRequest"]["id"]
+            review.repository_id = edge["node"]["repository"]["id"]
+            review.body_text = edge["node"]["bodyText"]
+            review.commit_id = edge["node"]["commit"]["id"]
+            review.total_comments = edge["node"]["comments"]["totalCount"]
+            review.total_edits = edge["node"]["userContentEdits"]["totalCount"]
+            review.total_reactions = edge["node"]["reactions"]["totalCount"]
+            review.total_for_teams = edge["node"]["onBehalfOf"]["totalCount"]
+            review.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
+            review.state = edge["node"]["state"]
+
+            # author can be None.  Who knew?
+            if edge["node"]["author"] is not None:
+                review.author = self._find_actor_by_login(edge["node"]["author"]["login"])
+            review.author_association = edge["node"]["authorAssociation"]
 
     def _get_expected_results(self):
         """
@@ -189,47 +181,42 @@ class LoadReviewsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMi
                                                        'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
 
     @staticmethod
-    def _pull_request_reviews_query(pull_request_id: str, review_cursor: str) -> str:
-        # static method for getting the query for all the reviews for a pull request
-
-        after = ''
-        if review_cursor:
-            after = 'after:"' + review_cursor + '", '
+    def _pull_request_reviews_query(pull_request_review_id: str) -> str:
+        # static method for getting the query for a review
 
         query = """
         {
-          node(id: \"""" + pull_request_id + """\") {
-            ... on PullRequest {
-              reviews(first: 100, """ + after + """) {
-                edges {
-                  cursor
-                  node {
-                    id
-                    author {
-                      login
-                    } 
-                    authorAssociation 
-                    bodyText
-                    createdAt
-                    commit {
-                      id
-                    }
-                    comments(first:1) {
-                      totalCount
-                    }
-                    reactions(first: 1){
-                      totalCount
-                    }
-                    userContentEdits(first:1){
-                      totalCount
-                    }
-                    onBehalfOf(first: 1) {
-                      totalCount
-                    }            
-                    state
-                  }
-                }
+          node(id: \"""" + pull_request_review_id + """\") {
+            ... on PullRequestReview {
+              id
+              pullRequest {
+                id
               }
+              repository {
+                id
+              }
+              author {
+                login
+              }
+              authorAssociation
+              bodyText
+              createdAt
+              commit {
+                id
+              }
+              comments(first: 1) {
+                totalCount
+              }
+              reactions(first: 1) {
+                totalCount
+              }
+              userContentEdits(first: 1) {
+                totalCount
+              }
+              onBehalfOf(first: 1) {
+                totalCount
+              }
+              state
             }
           }
         }

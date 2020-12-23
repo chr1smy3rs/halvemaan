@@ -76,7 +76,7 @@ class LoadCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupM
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name)]
+        return [pull_request.LoadCommentIdsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -91,64 +91,58 @@ class LoadCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupM
                                                      'object_type': base.ObjectType.PULL_REQUEST.name})
         for pr in pull_requests:
             pull_request_id: str = pr['id']
-            comments_expected: int = pr['total_comments']
             comments: [PullRequestComment] = []
             comment_ids: [str] = []
-            comment_cursor: str = None
             pull_request_reviewed += 1
 
-            while comments_expected > self._get_actual_comments(pull_request_id):
+            for comment_id in pr['comment_ids']:
                 logging.debug(
-                    f'running query for comments for pull request [{pull_request_id}] against {self.repository}'
+                    f'running query for comments for pull request [{pull_request_id}], '
+                    f'comment id: [{comment_id}] against {self.repository}'
                 )
-                query = self._pull_request_comments_query(pull_request_id, comment_cursor)
+                query = self._pull_request_comments_query(comment_id)
                 response_json = self.graph_ql_client.execute_query(query)
                 logging.debug(
-                    f'query complete for comments for pull request [{pull_request_id}] against {self.repository}'
+                    f'query complete for comments for pull request [{pull_request_id}] '
+                    f'comment id: [{comment_id}] against {self.repository}'
                 )
 
-                # iterate over each comment returned (we return 100 at a time)
-                for edge in response_json["data"]["node"]["comments"]["edges"]:
+                edge = response_json["data"]
+                comment = PullRequestComment(edge["node"]["id"])
+                comments.append(comment)
+                comment_ids.append(comment.id)
+                comment.repository_id = self.repository.id
+                comment.pull_request_id = pull_request_id
 
-                    comment_cursor = edge["cursor"]
-                    comment = PullRequestComment(edge["node"]["id"])
-                    comments.append(comment)
-                    comment_ids.append(comment.id)
-                    comment.repository_id = self.repository.id
-                    comment.pull_request_id = pull_request_id
+                # get the body text
+                comment.body_text = edge["node"]["bodyText"]
 
-                    # get the body text
-                    comment.body_text = edge["node"]["bodyText"]
+                # get the counts for the sub items to comment
+                comment.total_reactions = edge["node"]["reactions"]["totalCount"]
+                comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
 
-                    # get the counts for the sub items to comment
-                    comment.total_reactions = edge["node"]["reactions"]["totalCount"]
-                    comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
+                # author can be None.  Who knew?
+                if edge["node"]["author"] is not None:
+                    comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
+                comment.author_association = edge["node"]["authorAssociation"]
 
-                    # author can be None.  Who knew?
-                    if edge["node"]["author"] is not None:
-                        comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
-                    comment.author_association = edge["node"]["authorAssociation"]
+                # load if the comment has been minimized
+                if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
+                    comment.minimized_status = edge["node"]["minimizedReason"]
 
-                    # load if the comment has been minimized
-                    if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
-                        comment.minimized_status = edge["node"]["minimizedReason"]
+                # load the associate issue
+                if edge["node"]["issue"] is not None:
+                    comment.issue_id = edge["node"]["issue"]["id"]
 
-                    # load the associate issue
-                    if edge["node"]["issue"] is not None:
-                        comment.issue_id = edge["node"]["issue"]["id"]
+                # parse the datetime
+                comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
 
-                    # parse the datetime
-                    comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
-
-                    # check to see if pull request comment is in the database
-                    found_request = \
-                        self._get_collection().find_one({'id': comment.id,
-                                                         'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
-                    if found_request is None:
-                        self._get_collection().insert_one(comment.to_dictionary())
-
-            self._get_collection().update_one({'id': pull_request_id},
-                                              {'$set': {'comment_ids': comment_ids}})
+                # check to see if pull request comment is in the database
+                found_request = \
+                    self._get_collection().find_one({'id': comment.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
+                if found_request is None:
+                    self._get_collection().insert_one(comment.to_dictionary())
 
             logging.debug(f'pull requests reviewed for {self.repository} {pull_request_reviewed}/{pull_request_count}')
 
@@ -167,7 +161,7 @@ class LoadCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupM
                                                      'object_type': base.ObjectType.PULL_REQUEST.name})
         expected_count: int = 0
         for pr in pull_requests:
-            expected_count += pr['total_comments']
+            expected_count += len(pr['comment_ids'])
         logging.debug(f'count query complete for expected comments for pull requests against {self.repository}')
         return expected_count
 
@@ -176,48 +170,37 @@ class LoadCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupM
         returns the actual count per repository
         :return: expected counts
         """
-        return self._get_objects_saved_count(self.repository, base. ObjectType.PULL_REQUEST_COMMENT)
+        return self._get_objects_saved_count(self.repository, base.ObjectType.PULL_REQUEST_COMMENT)
 
     def _get_actual_comments(self, pull_request_id: str):
         return self._get_collection().count_documents({'pull_request_id': pull_request_id,
                                                        'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
 
     @staticmethod
-    def _pull_request_comments_query(pull_request_id: str, comment_cursor: str) -> str:
+    def _pull_request_comments_query(pull_request_comment_id: str) -> str:
         # static method for getting the query for all the comments for a pull request
-
-        after = ''
-        if comment_cursor:
-            after = 'after:"' + comment_cursor + '", '
 
         query = """
         {
-          node(id: \"""" + pull_request_id + """\") {
-            ... on PullRequest {
-              comments(first: 100, """ + after + """) {
-                edges {
-                  cursor
-                  node {
-                    id
-                    createdAt
-                    author {
-                      login
-                    } 
-                    authorAssociation 
-                    userContentEdits(first: 1) {
-                      totalCount
-                    }
-                    isMinimized
-                    minimizedReason
-                    issue {
-                      id
-                    }
-                    bodyText
-                    reactions(first:1) {
-                        totalCount
-                    }
-                  }
-                }
+          node(id: \"""" + pull_request_comment_id + """\") {
+            ... on IssueComment {
+              id
+              createdAt
+              author {
+                login
+              }
+              authorAssociation
+              userContentEdits(first: 1) {
+                totalCount
+              }
+              isMinimized
+              minimizedReason
+              issue {
+                id
+              }
+              bodyText
+              reactions(first: 1) {
+                totalCount
               }
             }
           }

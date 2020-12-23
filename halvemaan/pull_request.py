@@ -587,6 +587,116 @@ class LoadCommitIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookup
         luigi.run()
 
 
+class LoadCommentIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
+    """
+    Task for loading comment ids for the stored pull requests
+    """
+
+    def requires(self):
+        return [LoadPullRequestsTask(owner=self.owner, name=self.name)]
+
+    def run(self):
+        """
+        loads the comment ids for the pull requests for a specific repository
+        :return: None
+        """
+        pull_request_reviewed: int = 0
+
+        pull_request_count = self._get_objects_saved_count(self.repository, base.ObjectType.PULL_REQUEST)
+
+        pull_requests = self._get_collection().find({'repository_id': self.repository.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
+        for pr in pull_requests:
+            pull_request_id: str = pr['id']
+            comments_expected: int = pr['total_comments']
+            comment_ids: [str] = []
+            comment_cursor: str = None
+            pull_request_reviewed += 1
+
+            while comments_expected > len(comment_ids):
+                logging.debug(
+                    f'running query for comments for pull request [{pull_request_id}] against {self.repository}'
+                )
+                query = self._pull_request_comments_query(pull_request_id, comment_cursor)
+                response_json = self.graph_ql_client.execute_query(query)
+                logging.debug(
+                    f'query complete for comments for pull request [{pull_request_id}] against {self.repository}'
+                )
+
+                # iterate over each comment returned (we return 100 at a time)
+                for edge in response_json["data"]["node"]["comments"]["edges"]:
+
+                    comment_cursor = edge["cursor"]
+                    comment_ids.append(edge["node"]["id"])
+
+            self._get_collection().update_one({'id': pull_request_id},
+                                              {'$set': {'comment_ids': comment_ids}})
+
+            logging.debug(f'pull requests reviewed for {self.repository} {pull_request_reviewed}/{pull_request_count}')
+
+        actual_count: int = self._get_actual_results()
+        expected_count: int = self._get_expected_results()
+        logging.debug(f'comments returned for {self.repository} '
+                      f'returned: [{actual_count}], expected: [{expected_count}]')
+
+    def _get_expected_results(self):
+        """
+        returns the expected count per repository
+        :return: expected counts
+        """
+        logging.debug(f'running count query for expected comments for pull requests against {self.repository}')
+        pull_requests = self._get_collection().find({'repository_id': self.repository.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
+        expected_count: int = 0
+        for pr in pull_requests:
+            expected_count += pr['total_comments']
+        logging.debug(f'count query complete for expected comments for pull requests against {self.repository}')
+        return expected_count
+
+    def _get_actual_results(self):
+        """
+        returns the actual count per repository
+        :return: expected counts
+        """
+        logging.debug(f'running count query for actual comments for pull requests against {self.repository}')
+        pull_requests = self._get_collection().find({'repository_id': self.repository.id,
+                                                     'object_type': base.ObjectType.PULL_REQUEST.name})
+        actual_count: int = 0
+        for pr in pull_requests:
+            actual_count += len(pr['comment_ids'])
+        logging.debug(f'count query complete for actual comments for pull requests against {self.repository}')
+        return actual_count
+
+    @staticmethod
+    def _pull_request_comments_query(pull_request_id: str, comment_cursor: str) -> str:
+        # static method for getting the query for all the comments for a pull request
+
+        after = ''
+        if comment_cursor:
+            after = 'after:"' + comment_cursor + '", '
+
+        query = """
+        {
+          node(id: \"""" + pull_request_id + """\") {
+            ... on PullRequest {
+              comments(first: 100, """ + after + """) {
+                edges {
+                  cursor
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        return query
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
 class LoadEditsTask(content.GitSingleMongoEditsTask):
     """
     Task for loading edits for stored pull requests

@@ -155,6 +155,8 @@ class LoadReviewsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMi
                 review.author = self._find_actor_by_login(edge["node"]["author"]["login"])
             review.author_association = edge["node"]["authorAssociation"]
 
+            self._get_collection().insert_one(review.to_dictionary())
+
     def _get_expected_results(self):
         """
         returns the expected count per repository
@@ -217,6 +219,119 @@ class LoadReviewsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMi
                 totalCount
               }
               state
+            }
+          }
+        }
+        """
+        return query
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
+class LoadReviewCommentIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
+    """
+    Task for loading comments for the stored pull request reviews
+    """
+
+    def requires(self):
+        return [LoadReviewsTask(owner=self.owner, name=self.name)]
+
+    def run(self):
+        """
+        loads the comments for the pull request reviews for a specific repository
+        :return: None
+        """
+        pull_request_reviews_reviewed: int = 0
+
+        pull_request_review_count = self._get_objects_saved_count(self.repository, base.ObjectType.PULL_REQUEST_REVIEW)
+
+        pull_request_reviews = self._get_collection().find({'repository_id': self.repository.id,
+                                                           'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
+        for review in pull_request_reviews:
+            pull_request_review_id: str = review['id']
+            comments_expected: int = review['total_comments']
+            comment_ids: [str] = []
+            comment_cursor: str = None
+            pull_request_reviews_reviewed += 1
+
+            while comments_expected > len(comment_ids):
+                logging.debug(
+                    f'running query for comments for pull request review [{pull_request_review_id}] '
+                    f'against {self.repository}'
+                )
+                query = self._pull_request_review_comment_ids_query(pull_request_review_id, comment_cursor)
+                response_json = self.graph_ql_client.execute_query(query)
+                logging.debug(
+                    f'query complete for comments for pull request review [{pull_request_review_id}] '
+                    f'against {self.repository}'
+                )
+
+                # iterate over each comment returned (we return 100 at a time)
+                for edge in response_json["data"]["node"]["comments"]["edges"]:
+
+                    comment_cursor = edge["cursor"]
+                    comment_ids.append(edge["node"]["id"])
+
+            self._get_collection().update_one({'id': pull_request_review_id},
+                                              {'$set': {'comment_ids': comment_ids}})
+
+            logging.debug(f'pull request reviews reviewed for {self.repository} '
+                          f'{pull_request_reviews_reviewed}/{pull_request_review_count}')
+
+        actual_count: int = self._get_actual_results()
+        expected_count: int = self._get_expected_results()
+        logging.debug(f'comments returned for {self.repository} '
+                      f'returned: [{actual_count}], expected: [{expected_count}]')
+
+    def _get_expected_results(self):
+        """
+        returns the expected count per repository
+        :return: expected counts
+        """
+        logging.debug(f'running count query for expected review comments for pull requests against {self.repository}')
+        pull_request_reviews = self._get_collection().find({'repository_id': self.repository.id,
+                                                           'object_type': 'PULL_REQUEST_REVIEW'})
+        expected_count: int = 0
+        for review in pull_request_reviews:
+            expected_count += review['total_comments']
+        logging.debug(f'count query complete for expected review comments for pull requests against {self.repository}')
+        return expected_count
+
+    def _get_actual_results(self):
+        """
+        returns the actual count per repository
+        :return: expected counts
+        """
+        logging.debug(f'running count query for actual review comments for pull requests against {self.repository}')
+        pull_request_reviews = self._get_collection().find({'repository_id': self.repository.id,
+                                                           'object_type': 'PULL_REQUEST_REVIEW'})
+        expected_count: int = 0
+        for review in pull_request_reviews:
+            expected_count += len(review['comment_ids'])
+        logging.debug(f'count query complete for actual review comments for pull requests against {self.repository}')
+        return expected_count
+
+    @staticmethod
+    def _pull_request_review_comment_ids_query(pull_request_review_id: str, comment_cursor: str) -> str:
+        # static method for getting the query for all the comments for a pull request review
+
+        after = ''
+        if comment_cursor:
+            after = 'after:"' + comment_cursor + '", '
+
+        query = """
+        {
+          node(id: \"""" + pull_request_review_id + """\") {
+            ... on PullRequestReview {
+              comments(first: 100, """ + after + """) {
+                edges {
+                  cursor
+                  node {
+                    id
+                  }
+                }
+              }
             }
           }
         }

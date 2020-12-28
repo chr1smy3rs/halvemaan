@@ -39,14 +39,15 @@ class GraphQLStatusException(Exception):
 
 class GraphQLClient:
 
-    def __init__(self, url, git_token):
+    def __init__(self, url: str, git_token: str, config_timeout: int = 60):
         self.url = url
         self.header_token = 'bearer ' + git_token
+        self.timeout = config_timeout
 
     def execute_query(self, query: str, counter: int = 3) -> json:
         try:
             response = requests.post(self.url, json={'query': query},
-                                     headers={'Authorization': self.header_token})
+                                     headers={'Authorization': self.header_token}, timeout=self.timeout)
 
             if response.status_code == 200:
                 response_json = json.loads(response.content)

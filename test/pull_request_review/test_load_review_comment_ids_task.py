@@ -18,7 +18,7 @@ import unittest
 
 import luigi
 
-from halvemaan import pull_request_review, pull_request, base
+from halvemaan import pull_request_review, base
 from test import CaseSetup
 
 

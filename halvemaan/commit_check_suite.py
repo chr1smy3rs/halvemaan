@@ -79,8 +79,7 @@ class CheckSuite:
         }
 
 
-class LoadCommitCheckSuitesTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
-                                      repository.GitRepositoryCountMixin):
+class LoadCommitCheckSuitesTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading check suite ids for saved commits
     """

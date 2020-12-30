@@ -20,7 +20,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import user, base, repository, pull_request, pull_request_review, pull_request_review_comment, actor
+from halvemaan import base, repository, pull_request, pull_request_review, pull_request_review_comment, actor
 
 luigi.auto_namespace(scope=__name__)
 
@@ -143,7 +143,8 @@ class Commit:
         }
 
 
-class GitSingleCommitsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, metaclass=abc.ABCMeta):
+class GitSingleRepositoryCommitsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                     metaclass=abc.ABCMeta):
     """
     Task for loading commits
     """
@@ -258,7 +259,7 @@ class GitSingleCommitsTask(repository.GitSingleRepositoryTask, actor.GitActorLoo
 
     def _find_unsaved_commits_with_multiple_commits(self) -> [str]:
         """
-        returns a list of unsaved commits from items
+        returns a list of unsaved commits from items with a list/array of commits associated to the item
         :return:
         """
         result: {str} = set()
@@ -276,7 +277,7 @@ class GitSingleCommitsTask(repository.GitSingleRepositoryTask, actor.GitActorLoo
 
     def _find_unsaved_commits_with_single_commit(self) -> [str]:
         """
-        returns a list of unsaved commits from the item type
+        returns a list of unsaved commits from items with a single commit associated to the item
         :return:
         """
         result: {str} = set()
@@ -360,7 +361,7 @@ class GitSingleCommitsTask(repository.GitSingleRepositoryTask, actor.GitActorLoo
         return query
 
 
-class LoadCommitsTask(GitSingleCommitsTask):
+class LoadCommitsTask(GitSingleRepositoryCommitsTask):
     """
     Task for loading commits from pull requests
     """
@@ -383,7 +384,7 @@ class LoadCommitsTask(GitSingleCommitsTask):
         luigi.run()
 
 
-class LoadReviewCommitsTask(GitSingleCommitsTask):
+class LoadReviewCommitsTask(GitSingleRepositoryCommitsTask):
     """
     Task for loading commits from pull requests
     """
@@ -406,7 +407,7 @@ class LoadReviewCommitsTask(GitSingleCommitsTask):
         luigi.run()
 
 
-class LoadReviewCommentCommitsTask(GitSingleCommitsTask):
+class LoadReviewCommentCommitsTask(GitSingleRepositoryCommitsTask):
     """
     Task for loading commits from pull request review comments
     """
@@ -656,6 +657,119 @@ class LoadCommitActorIdsTask(repository.GitSingleRepositoryTask, actor.GitActorL
           }
         }
 
+        """
+        return query
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
+class LoadCommitCommentIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
+    """
+    Task for loading comment ids for saved commits
+    """
+
+    def requires(self):
+        return [LoadCommitsTask(owner=self.owner, name=self.name),
+                LoadReviewCommitsTask(owner=self.owner, name=self.name),
+                LoadReviewCommentCommitsTask(owner=self.owner, name=self.name)]
+
+    def run(self):
+        """
+        loads the comments for the commits for a specific repository
+        :return: None
+        """
+        commits_reviewed: int = 0
+
+        commit_count = self._get_objects_saved_count(self.repository, base.ObjectType.COMMIT)
+
+        commits = self._get_collection().find({'repository_id': self.repository.id,
+                                               'object_type': base.ObjectType.COMMIT.name})
+        for item in commits:
+            commit_id: str = item['id']
+            comments_expected: int = item['total_comments']
+            comment_ids: [str] = []
+            comment_cursor: str = None
+            commits_reviewed += 1
+
+            if comments_expected > len(item['comment_ids']):
+                while comments_expected > len(comment_ids):
+                    logging.debug(
+                        f'running query for comments for commit [{commit_id}] against {self.repository}'
+                    )
+                    query = self._commit_comment_query(commit_id, comment_cursor)
+                    response_json = self.graph_ql_client.execute_query(query)
+                    logging.debug(
+                        f'query complete for comments for commit [{commit_id}] against {self.repository}'
+                    )
+
+                    # iterate over each participant returned (we return 100 at a time)
+                    for edge in response_json["data"]["node"]["comments"]["edges"]:
+                        comment_cursor = edge["cursor"]
+                        comment_ids.append(edge["node"]["id"])
+
+                self._get_collection().update_one({'id': commit_id},
+                                                  {'$set': {'comment_ids': comment_ids}})
+
+            logging.debug(f'pull requests reviewed for {self.repository} {commits_reviewed}/{commit_count}')
+
+        actual_count: int = self._get_actual_results()
+        expected_count: int = self._get_expected_results()
+        logging.debug(
+            f'participants returned for {self.repository} returned: [{actual_count}], expected: [{expected_count}]'
+        )
+
+    def _get_expected_results(self):
+        """
+        always find the expected number of commit comments for the entire repository
+        :return: 0
+        """
+        logging.debug(f'running count query for expected comments for the commits in {self.repository}')
+        commits = self._get_collection().find({'repository_id': self.repository.id,
+                                               'object_type': base.ObjectType.COMMIT.name})
+        expected_count: int = 0
+        for item in commits:
+            expected_count += item['total_comments']
+        logging.debug(f'count query complete for expected comments for the commits in {self.repository}')
+        return expected_count
+
+    def _get_actual_results(self):
+        """
+        always find the actual number of commit comments for the entire repository
+        :return: 0
+        """
+        logging.debug(f'running count query for actual comments for the commits in {self.repository}')
+        commits = self._get_collection().find({'repository_id': self.repository.id,
+                                               'object_type': base.ObjectType.COMMIT.name})
+        actual_count: int = 0
+        for item in commits:
+            actual_count += len(item['comment_ids'])
+        logging.debug(f'count query complete for actual comments for the commits in {self.repository}')
+        return actual_count
+
+    @staticmethod
+    def _commit_comment_query(commit_id: str, comment_cursor: str) -> str:
+        # static method for getting the query for a specific commit
+
+        after = ''
+        if comment_cursor:
+            after = ', after:"' + comment_cursor + '", '
+
+        query = """
+        {
+          node(id: \"""" + commit_id + """\") {
+            ... on Commit {
+              comments(first: 100""" + after + """) {
+                edges {
+                  cursor
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
         """
         return query
 

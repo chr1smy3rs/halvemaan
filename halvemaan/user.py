@@ -260,8 +260,8 @@ class LoadUsersTask(GitSingleUsersTask):
     """
 
     def requires(self):
-        return [pull_request.LoadPullRequestsTaskSingle(owner=self.owner, name=self.name),
-                pull_request.LoadParticipantsTaskSingle(owner=self.owner, name=self.name),
+        return [pull_request.LoadPullRequestsTask(owner=self.owner, name=self.name),
+                pull_request.LoadParticipantIdsTask(owner=self.owner, name=self.name),
                 pull_request.LoadEditsTask(owner=self.owner, name=self.name),
                 pull_request.LoadReactionsTask(owner=self.owner, name=self.name)]
 
@@ -305,7 +305,7 @@ class LoadCommentUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.PULL_REQUEST_COMMENT
 
     def requires(self):
-        return [pull_request_comment.LoadCommentsTaskSingle(owner=self.owner, name=self.owner),
+        return [pull_request_comment.LoadCommentsTask(owner=self.owner, name=self.owner),
                 pull_request_comment.LoadCommentEditsTask(owner=self.owner, name=self.owner),
                 pull_request_comment.LoadCommentReactionsTask(owner=self.owner, name=self.owner)]
 
@@ -326,7 +326,7 @@ class LoadReviewUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW
 
     def requires(self):
-        return [pull_request_review.LoadReviewsTaskSingle(owner=self.owner, name=self.name),
+        return [pull_request_review.LoadReviewsTask(owner=self.owner, name=self.name),
                 pull_request_review.LoadReviewEditsTask(owner=self.owner, name=self.name),
                 pull_request_review.LoadReviewReactionsTask(owner=self.owner, name=self.name)]
 
@@ -347,7 +347,7 @@ class LoadReviewCommentUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.PULL_REQUEST_REVIEW_COMMENT
 
     def requires(self):
-        return [pull_request_review_comment.LoadReviewCommentsTaskSingle(owner=self.owner, name=self.name),
+        return [pull_request_review_comment.LoadReviewCommentsTask(owner=self.owner, name=self.name),
                 pull_request_review_comment.LoadReviewCommentEditsTask(owner=self.owner, name=self.name),
                 pull_request_review_comment.LoadReviewCommentReactionsTask(owner=self.owner, name=self.name)]
 
@@ -361,7 +361,7 @@ class LoadCommitUsersTask(GitSingleUsersTask):
     """
 
     def requires(self):
-        return [commit.LoadCommitActorIdsTaskSingle(owner=self.owner, name=self.name)]
+        return [commit.LoadCommitActorIdsTask(owner=self.owner, name=self.name)]
 
     def _find_unsaved_users(self) -> [str]:
         """
@@ -407,7 +407,7 @@ class LoadCommitCommentUsersTask(GitSubUsersTask):
         self.object_type = base.ObjectType.COMMIT_COMMENT
 
     def requires(self):
-        return [commit_comment.LoadCommitCommentsTaskSingle(owner=self.owner, name=self.name),
+        return [commit_comment.LoadCommitCommentsTask(owner=self.owner, name=self.name),
                 commit_comment.LoadCommitCommentEditsTask(owner=self.owner, name=self.name),
                 commit_comment.LoadCommitCommentReactionsTask(owner=self.owner, name=self.name)]
 

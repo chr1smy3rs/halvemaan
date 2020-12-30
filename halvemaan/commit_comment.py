@@ -72,15 +72,13 @@ class CommitComment(content.Comment):
         }
 
 
-class LoadCommitCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
+class LoadCommitCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
     """
     Task for loading comment ids for saved commits
     """
 
     def requires(self):
-        return [commit.LoadCommitsTask(owner=self.owner, name=self.name),
-                commit.LoadReviewCommitsTask(owner=self.owner, name=self.name),
-                commit.LoadReviewCommentCommitsTask(owner=self.owner, name=self.name)]
+        return [commit.LoadCommitCommentIdsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -95,65 +93,56 @@ class LoadCommitCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.Git
                                                'object_type': base.ObjectType.COMMIT.name})
         for item in commits:
             commit_id: str = item['id']
-            comments_expected: int = item['total_comments']
-            comment_ids: [str] = []
-            comment_cursor: str = None
             commits_reviewed += 1
 
-            if comments_expected > len(item['comment_ids']):
-                while comments_expected > len(comment_ids):
+            for comment_id in item['comment_ids']:
+
+                # check to see if commit comment is in the database
+                found_request = \
+                    self._get_collection().find_one({'id': comment_id,
+                                                     'object_type': base.ObjectType.COMMIT_COMMENT.name})
+                if found_request is None:
                     logging.debug(
                         f'running query for comments for commit [{commit_id}] against {self.repository}'
                     )
-                    query = self._commit_comment_query(commit_id, comment_cursor)
+                    query = self._commit_comment_query(commit_id)
                     response_json = self.graph_ql_client.execute_query(query)
                     logging.debug(
                         f'query complete for comments for commit [{commit_id}] against {self.repository}'
                     )
 
-                    # iterate over each participant returned (we return 100 at a time)
-                    for edge in response_json["data"]["node"]["comments"]["edges"]:
-                        comment_cursor = edge["cursor"]
-                        commit_comment = CommitComment(edge["node"]["id"])
-                        comment_ids.append(commit_comment.id)
-                        commit_comment.repository_id = self.repository.id
-                        commit_comment.commit_id = commit_id
+                    edge = response_json["data"]
+                    commit_comment = CommitComment(edge["node"]["id"])
+                    commit_comment.repository_id = edge["node"]["repository"]["id"]
+                    commit_comment.commit_id = commit_id
 
-                        # get the counts for the sub items to comment
-                        commit_comment.total_reactions = edge["node"]["reactions"]["totalCount"]
-                        commit_comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
+                    # get the counts for the sub items to comment
+                    commit_comment.total_reactions = edge["node"]["reactions"]["totalCount"]
+                    commit_comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
 
-                        # get the body text
-                        commit_comment.body_text = edge["node"]["bodyText"]
+                    # get the body text
+                    commit_comment.body_text = edge["node"]["bodyText"]
 
-                        # parse the datetime
-                        commit_comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
+                    # parse the datetime
+                    commit_comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
 
-                        # set the path
-                        commit_comment.path = edge["node"]["path"]
+                    # set the path
+                    commit_comment.path = edge["node"]["path"]
 
-                        # author can be None.  Who knew?
-                        if edge["node"]["author"] is not None:
-                            commit_comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
-                        commit_comment.author_association = edge["node"]['authorAssociation']
+                    # author can be None.  Who knew?
+                    if edge["node"]["author"] is not None:
+                        commit_comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
+                    commit_comment.author_association = edge["node"]['authorAssociation']
 
-                        # set the position
-                        if edge["node"]["position"] is not None:
-                            commit_comment.position = edge["node"]["position"]
+                    # set the position
+                    if edge["node"]["position"] is not None:
+                        commit_comment.position = edge["node"]["position"]
 
-                        # set if the comment has been minimized
-                        if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
-                            commit_comment.minimized_status = edge["node"]["minimizedReason"]
+                    # set if the comment has been minimized
+                    if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
+                        commit_comment.minimized_status = edge["node"]["minimizedReason"]
 
-                        # check to see if pull request comment is in the database
-                        found_request = \
-                            self._get_collection().find_one({'id': commit_comment.id,
-                                                             'object_type': base.ObjectType.COMMIT_COMMENT.name})
-                        if found_request is None:
-                            self._get_collection().insert_one(commit_comment.to_dictionary())
-
-                self._get_collection().update_one({'id': commit_id},
-                                                  {'$set': {'comment_ids': comment_ids}})
+                    self._get_collection().insert_one(commit_comment.to_dictionary())
 
             logging.debug(f'pull requests reviewed for {self.repository} {commits_reviewed}/{commit_count}')
 
@@ -173,59 +162,44 @@ class LoadCommitCommentsTaskSingle(repository.GitSingleRepositoryTask, actor.Git
                                                'object_type': base.ObjectType.COMMIT.name})
         expected_count: int = 0
         for item in commits:
-            expected_count += item['total_comments']
+            expected_count += len(item['comment_ids'])
         logging.debug(f'count query complete for expected comments for the commits in {self.repository}')
         return expected_count
 
     def _get_actual_results(self):
         """
-        returns the number of saved pull request ids...
+        returns the number of saved commit comments...
         :return: integer number
         """
-        logging.debug(f'running count query for actual comments for the commits in {self.repository}')
-        commits = self._get_collection().find({'repository_id': self.repository.id,
-                                               'object_type': base.ObjectType.COMMIT.name})
-        actual_count: int = 0
-        for item in commits:
-            actual_count += len(item['comment_ids'])
-        logging.debug(f'count query complete for actual comments for the commits in {self.repository}')
-        return actual_count
+        return self._get_objects_saved_count(self.repository, base.ObjectType.COMMIT_COMMENT)
 
     @staticmethod
-    def _commit_comment_query(commit_id: str, comment_cursor: str) -> str:
-        # static method for getting the query for a specific commit
-
-        after = ''
-        if comment_cursor:
-            after = ', after:"' + comment_cursor + '", '
+    def _commit_comment_query(commit_comment_id: str) -> str:
+        # static method for getting the query for a specific commit comment
 
         query = """
         {
-          node(id: \"""" + commit_id + """\") {
-            ... on Commit {
-              comments(first: 100""" + after + """) {
-                edges {
-                  cursor
-                  node {
-                    id
-                    author{
-                      login
-                    }
-                    authorAssociation
-                    bodyText
-                    createdAt
-                    isMinimized
-                    minimizedReason
-                    path
-                    position
-                    reactions(first:1){
-                      totalCount
-                    }
-                    userContentEdits(first:1){
-                      totalCount
-                    }
-                  }
-                }
+          node(id: \"""" + commit_comment_id + """\") {
+            ... on CommitComment {
+              id
+              author {
+                login
+              }
+              authorAssociation
+              repository {
+                id
+              }
+              bodyText
+              createdAt
+              isMinimized
+              minimizedReason
+              path
+              position
+              reactions(first: 1) {
+                totalCount
+              }
+              userContentEdits(first: 1) {
+                totalCount
               }
             }
           }
@@ -250,7 +224,7 @@ class LoadCommitCommentEditsTask(content.GitSingleMongoEditsTask):
         self.object_type = base.ObjectType.COMMIT_COMMENT
 
     def requires(self):
-        return [LoadCommitCommentsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadCommitCommentsTask(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _edits_query(item_id: str, edit_cursor: str) -> str:
@@ -307,7 +281,7 @@ class LoadCommitCommentReactionsTask(content.GitSingleMongoReactionsTask):
         self.object_type = base.ObjectType.COMMIT_COMMENT
 
     def requires(self):
-        return [LoadCommitCommentsTaskSingle(owner=self.owner, name=self.name)]
+        return [LoadCommitCommentsTask(owner=self.owner, name=self.name)]
 
     @staticmethod
     def _reactions_query(item_id: str, reaction_cursor: str) -> str:

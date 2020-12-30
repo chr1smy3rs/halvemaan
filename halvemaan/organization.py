@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import abc
 import logging
 
 import luigi
@@ -57,18 +58,14 @@ class Organization:
         }
 
 
-class LoadOrganizationsTask(repository.GitMultiRepositoryTask):
+class LoadOrganizationsForOthersTask(repository.GitMultiRepositoryTask, metaclass=abc.ABCMeta):
     """
-    Task for loading organizations based on what users are linked to
+    Task for loading organizations based on what other documents have links for
     """
 
+    @abc.abstractmethod
     def requires(self):
-        result = [user.LoadUserOrganizationIdsTask(repository_information=self.repository_information)]
-        for repo in self.repository_information["repositories"]:
-            owner = repo["owner"]
-            name = repo["name"]
-            result.append(commit.LoadCommitsTask(owner=owner, name=name))
-        return result
+        pass
 
     def run(self):
         for organization_id in self._find_unsaved_organizations():
@@ -100,31 +97,13 @@ class LoadOrganizationsTask(repository.GitMultiRepositoryTask):
         """
         return len(self._find_unsaved_organizations())
 
+    @abc.abstractmethod
     def _find_unsaved_organizations(self) -> [str]:
         """
-        returns a list of unsaved organizations from users
+        returns a list of unsaved organizations
         :return:
         """
-        result: {str} = set()
-        logging.debug(f'running count query for expected organizations')
-        logging.debug(f'running query for users')
-        users = self._get_collection().find({'object_type': 'USER'})
-        logging.debug(f'query for users complete')
-        for item in users:
-            if item['total_organizations'] > 0:
-                for organization_id in item['organizations']:
-                    if organization_id not in result and not self._is_organization_in_database(organization_id):
-                        result.add(organization_id)
-        logging.debug(f'running query for commits')
-        commits = self._get_collection().find({'object_type': 'COMMIT'})
-        logging.debug(f'query for commits complete')
-        for item in commits:
-            if item['for_organization_id'] is not None:
-                organization_id = item['for_organization_id']
-                if organization_id not in result and not self._is_organization_in_database(organization_id):
-                    result.add(organization_id)
-        logging.debug(f'count query complete for expected organizations')
-        return result
+        pass
 
     def _is_organization_in_database(self, organization_id: str):
         logging.debug(f'running query to find organization {organization_id} in database')
@@ -148,6 +127,69 @@ class LoadOrganizationsTask(repository.GitMultiRepositoryTask):
         }
         """
         return query
+
+
+class LoadOrganizationsForCommitsTask(LoadOrganizationsForOthersTask):
+    """
+    Task for loading organizations based on what Commits are linked to
+    """
+
+    def requires(self):
+        result = []
+        for repo in self.repository_information["repositories"]:
+            owner = repo["owner"]
+            name = repo["name"]
+            result.append(commit.LoadCommitsTask(owner=owner, name=name))
+            result.append(commit.LoadReviewCommitsTask(owner=owner, name=name))
+            result.append(commit.LoadReviewCommentCommitsTask(owner=owner, name=name))
+        return result
+
+    def _find_unsaved_organizations(self) -> [str]:
+        """
+        returns a list of unsaved organizations from users
+        :return:
+        """
+        result: {str} = set()
+        logging.debug(f'running query for commits')
+        commits = self._get_collection().find({'object_type': 'COMMIT'})
+        logging.debug(f'query for commits complete')
+        for item in commits:
+            if item['for_organization_id'] is not None:
+                organization_id = item['for_organization_id']
+                if organization_id not in result and not self._is_organization_in_database(organization_id):
+                    result.add(organization_id)
+        logging.debug(f'count query complete for expected organizations')
+        return result
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
+class LoadOrganizationsForUsersTask(LoadOrganizationsForOthersTask):
+    """
+    Task for loading organizations based on what users are linked to
+    """
+
+    def requires(self):
+        return [user.LoadUserOrganizationIdsTask(repository_information=self.repository_information)]
+
+    def _find_unsaved_organizations(self) -> [str]:
+        """
+        returns a list of unsaved organizations from users
+        :return:
+        """
+        result: {str} = set()
+        logging.debug(f'running count query for expected organizations')
+        logging.debug(f'running query for users')
+        users = self._get_collection().find({'object_type': 'USER'})
+        logging.debug(f'query for users complete')
+        for item in users:
+            if item['total_organizations'] > 0:
+                for organization_id in item['organizations']:
+                    if organization_id not in result and not self._is_organization_in_database(organization_id):
+                        result.add(organization_id)
+        logging.debug(f'count query complete for expected organizations')
+        return result
 
     if __name__ == '__main__':
         luigi.run()

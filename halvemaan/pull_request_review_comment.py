@@ -100,7 +100,7 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
     """
 
     def requires(self):
-        return [pull_request_review.LoadReviewsTask(owner=self.owner, name=self.name)]
+        return [pull_request_review.LoadReviewCommentIdsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -116,32 +116,30 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
         for review in pull_request_reviews:
             pull_request_review_id: str = review['id']
             pull_request_id: str = review['pull_request_id']
-            comments_expected: int = review['total_comments']
-            comments: [PullRequestReviewComment] = []
-            comment_ids: [str] = []
-            comment_cursor: str = None
             pull_request_reviews_reviewed += 1
 
-            while comments_expected > self._get_actual_comments(pull_request_review_id):
-                logging.debug(
-                    f'running query for comments for pull request review [{pull_request_review_id}] '
-                    f'against {self.repository}'
-                )
-                query = self._pull_request_review_comments_query(pull_request_review_id, comment_cursor)
-                response_json = self.graph_ql_client.execute_query(query)
-                logging.debug(
-                    f'query complete for comments for pull request review [{pull_request_review_id}] '
-                    f'against {self.repository}'
-                )
+            for comment_id in review['comment_ids']:
 
-                # iterate over each comment returned (we return 100 at a time)
-                for edge in response_json["data"]["node"]["comments"]["edges"]:
+                # check to see if pull request comment is in the database
+                found_request = \
+                    self._get_collection().find_one({'id': comment_id, 'object_type':
+                                                    base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
+                if found_request is None:
 
-                    comment_cursor = edge["cursor"]
+                    logging.debug(
+                        f'running query for comment [{comment_id}] for pull request review [{pull_request_review_id}] '
+                        f'against {self.repository}'
+                    )
+                    query = self._pull_request_review_comments_query(comment_id)
+                    response_json = self.graph_ql_client.execute_query(query)
+                    logging.debug(
+                        f'query complete for comment [{comment_id}]  for pull request review [{pull_request_review_id}] '
+                        f'against {self.repository}'
+                    )
+
+                    edge = response_json["data"]
                     comment = PullRequestReviewComment(edge["node"]["id"])
-                    comments.append(comment)
-                    comment_ids.append(comment.id)
-                    comment.repository_id = self.repository.id
+                    comment.repository_id = edge["node"]["repository"]["id"]
                     comment.pull_request_id = pull_request_id
                     comment.pull_request_review_id = pull_request_review_id
                     comment.state = edge["node"]["state"]
@@ -191,15 +189,7 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
                     if edge["node"]["replyTo"] is not None:
                         comment.reply_to_comment_id = edge["node"]["replyTo"]["id"]
 
-                    # check to see if pull request comment is in the database
-                    found_request = \
-                        self._get_collection().find_one({'id': comment.id, 'object_type':
-                                                        base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
-                    if found_request is None:
-                        self._get_collection().insert_one(comment.to_dictionary())
-
-            self._get_collection().update_one({'id': pull_request_review_id},
-                                              {'$set': {'comment_ids': comment_ids}})
+                    self._get_collection().insert_one(comment.to_dictionary())
 
             logging.debug(f'pull request reviews reviewed for {self.repository} '
                           f'{pull_request_reviews_reviewed}/{pull_request_review_count}')
@@ -219,7 +209,7 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
                                                            'object_type': 'PULL_REQUEST_REVIEW'})
         expected_count: int = 0
         for review in pull_request_reviews:
-            expected_count += review['total_comments']
+            expected_count += len(review['comment_ids'])
         logging.debug(f'count query complete for expected review comments for pull requests against {self.repository}')
         return expected_count
 
@@ -235,53 +225,45 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
                                                        'object_type': base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
 
     @staticmethod
-    def _pull_request_review_comments_query(pull_request_review_id: str, comment_cursor: str) -> str:
+    def _pull_request_review_comments_query(pull_request_review_comment_id: str) -> str:
         # static method for getting the query for all the comments for a pull request review
-
-        after = ''
-        if comment_cursor:
-            after = 'after:"' + comment_cursor + '", '
 
         query = """
         {
-          node(id: \"""" + pull_request_review_id + """\") {
-            ... on PullRequestReview {
-              comments(first: 100, """ + after + """) {
-                edges {
-                  cursor
-                  node {
-                    id
-                    author {
-                      login
-                    }
-                    authorAssociation
-                    bodyText
-                    createdAt
-                    diffHunk
-                    path
-                    originalPosition
-                    position
-                    isMinimized
-                    minimizedReason
-                    originalCommit {
-                      id
-                    }
-                    commit {
-                      id
-                    }
-                    replyTo {
-                      id
-                    }
-                    userContentEdits(first: 1) {
-                      totalCount
-                    }
-                    reactions(first: 1) {
-                      totalCount
-                    }
-                    state
-                  }
-                }
+          node(id: \"""" + pull_request_review_comment_id + """\") {
+            ... on PullRequestReviewComment {
+              id
+              author {
+                login
               }
+              authorAssociation
+              repository {
+                id
+              }
+              bodyText
+              createdAt
+              diffHunk
+              path
+              originalPosition
+              position
+              isMinimized
+              minimizedReason
+              originalCommit {
+                id
+              }
+              commit {
+                id
+              }
+              replyTo {
+                id
+              }
+              userContentEdits(first: 1) {
+                totalCount
+              }
+              reactions(first: 1) {
+                totalCount
+              }
+              state
             }
           }
         }

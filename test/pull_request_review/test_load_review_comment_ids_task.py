@@ -40,9 +40,7 @@ class LoadReviewCommentIdsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review.LoadReviewCommentIdsTask(owner='Netflix', name='mantis')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-
-        self.assertEqual(LoadReviewCommentIdsTaskTestCase._get_actual_reviews(case_setup),
-                         LoadReviewCommentIdsTaskTestCase._get_expected_reviews(case_setup))
+        self._validate_reviews(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when record is in database """
@@ -55,27 +53,19 @@ class LoadReviewCommentIdsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review.LoadReviewCommentIdsTask(owner='Netflix', name='dial-reference')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, complete_tasks=1, successful_tasks=1))
+        self._validate_reviews(case_setup)
 
-        self.assertEqual(LoadReviewCommentIdsTaskTestCase._get_actual_reviews(case_setup),
-                         LoadReviewCommentIdsTaskTestCase._get_expected_reviews(case_setup))
-
-    @staticmethod
-    def _get_actual_reviews(case_setup: CaseSetup):
-        """ find the total number of stored comment ids for pull request review documents in the database """
+    def _validate_reviews(self, case_setup: CaseSetup):
         total_actual_comment_ids = 0
         reviews = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
         for review in reviews:
             total_actual_comment_ids += len(review['comment_ids'])
-        return total_actual_comment_ids
 
-    @staticmethod
-    def _get_expected_reviews(case_setup: CaseSetup):
-        """ find the total number of comments for pull request review documents in the database """
         total_expected_comment_ids = 0
         reviews = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
         for review in reviews:
             total_expected_comment_ids += review['total_comments']
-        return total_expected_comment_ids
+        self.assertEqual(total_actual_comment_ids, total_expected_comment_ids)
 
 
 if __name__ == '__main__':

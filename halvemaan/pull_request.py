@@ -19,7 +19,7 @@ from datetime import datetime
 
 import luigi
 
-from halvemaan import base, user, repository, content, actor
+from halvemaan import base, repository, content, actor
 
 luigi.auto_namespace(scope=__name__)
 

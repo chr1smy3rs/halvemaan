@@ -18,12 +18,12 @@ import unittest
 
 import luigi
 
-from halvemaan import pull_request_comment, base
+from halvemaan import commit, base, pull_request_review_comment
 from test import CaseSetup
 
 
-class LoadCommentEditsTaskTestCase(unittest.TestCase):
-    """ Tests the loading of edits into the pull request documents into the mongo database """
+class LoadReviewCommitsTaskTestCase(unittest.TestCase):
+    """ Tests the loading of commits associated to pull request documents into the mongo database """
 
     def setUp(self) -> None:
         case_setup = CaseSetup()
@@ -33,36 +33,38 @@ class LoadCommentEditsTaskTestCase(unittest.TestCase):
         """ checks for insert when no record is in database """
         case_setup = CaseSetup()
 
-        result = luigi.build([pull_request_comment.LoadCommentEditsTask(owner='Netflix', name='frigga')],
+        result = luigi.build([commit.LoadReviewCommentCommitsTask(owner='Netflix', name='dispatch-docker')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue(CaseSetup.validate_result(result, total_tasks=6, successful_tasks=6))
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=8, successful_tasks=8))
 
         # test for task complete after being run successfully
-        result = luigi.build([pull_request_comment.LoadCommentEditsTask(owner='Netflix', name='frigga')],
+        result = luigi.build([commit.LoadReviewCommentCommitsTask(owner='Netflix', name='dispatch-docker')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-        self._validate_comments(case_setup)
+        self._validate_commits(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when repository is in database """
         case_setup = CaseSetup()
 
-        result = luigi.build([pull_request_comment.LoadCommentsTask(owner='Netflix', name='pollyjs')],
+        result = luigi.build([pull_request_review_comment.LoadReviewCommentsTask(owner='Netflix', name='mantis')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue(CaseSetup.validate_result(result, total_tasks=5, successful_tasks=5))
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=7, successful_tasks=7))
 
         # test for load after repo data is loaded
-        result = luigi.build([pull_request_comment.LoadCommentEditsTask(owner='Netflix', name='pollyjs')],
+        result = luigi.build([commit.LoadReviewCommentCommitsTask(owner='Netflix', name='mantis')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
-        self._validate_comments(case_setup)
+        self._validate_commits(case_setup)
 
-    def _validate_comments(self, case_setup: CaseSetup):
-        pr_comments = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
-        valid = True
-        for pr_comment in pr_comments:
-            valid = valid and pr_comment['total_edits'] == len(pr_comment['edits'])
-        self.assertTrue(valid)
+    def _validate_commits(self, case_setup: CaseSetup):
+        expected_commit_count = 0
+        comments = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
+        for comment in comments:
+            if comment['commit_id']:
+                expected_commit_count += 1
+        actual_commit_count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name})
+        self.assertTrue(expected_commit_count, actual_commit_count)
 
 
 if __name__ == '__main__':

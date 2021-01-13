@@ -41,7 +41,7 @@ class LoadReviewCommentEditsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review_comment.LoadReviewCommentEditsTask(owner='Netflix', name='frigga')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-        self.assertTrue(LoadReviewCommentEditsTaskTestCase._validate_edits(case_setup))
+        self._validate_comments(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when repository is in database """
@@ -55,15 +55,14 @@ class LoadReviewCommentEditsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review_comment.LoadReviewCommentEditsTask(owner='Netflix', name='pollyjs')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
-        self.assertTrue(LoadReviewCommentEditsTaskTestCase._validate_edits(case_setup))
+        self._validate_comments(case_setup)
 
-    @staticmethod
-    def _validate_edits(case_setup: CaseSetup) -> bool:
+    def _validate_comments(self, case_setup: CaseSetup):
         review_comments = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
         valid = True
         for review_comment in review_comments:
             valid = valid and review_comment['total_edits'] == len(review_comment['edits'])
-        return valid
+        self.assertTrue(valid)
 
 
 if __name__ == '__main__':

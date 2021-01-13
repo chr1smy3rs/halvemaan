@@ -35,17 +35,11 @@ class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
         result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='junit-team', name='junit5-samples')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=2))
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
 
         result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='junit-team', name='junit5-samples')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
-        saved_repo = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(saved_repo['total_pull_requests'], len(saved_repo['pull_request_ids']))
+        self._validate_repository(case_setup)
 
     def test_repository_in_database(self):
         """ checks for insert when record is in database """
@@ -55,10 +49,13 @@ class LoadRepositoryPullRequestIdsTaskTestCase(unittest.TestCase):
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
 
-        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='microsoft', name='InnerEye-DeepLearning')],
+        result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='microsoft',
+                                                                          name='InnerEye-DeepLearning')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
+        self._validate_repository(case_setup)
 
+    def _validate_repository(self, case_setup: CaseSetup):
         count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertEqual(1, count)
         saved_repo = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})

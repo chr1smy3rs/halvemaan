@@ -36,16 +36,12 @@ class LoadPullRequestsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request.LoadPullRequestsTask(owner='microsoft', name='InnerEye-DeepLearning')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=3, successful_tasks=3))
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.PULL_REQUEST.name})
-        saved_repo = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(count, saved_repo['total_pull_requests'])
 
         # test for task complete after being run successfully
         result = luigi.build([pull_request.LoadPullRequestsTask(owner='microsoft', name='InnerEye-DeepLearning')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
+        self._validate_pull_requests(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when repository is in database """
@@ -54,16 +50,16 @@ class LoadPullRequestsTaskTestCase(unittest.TestCase):
         result = luigi.build([repository.LoadRepositoryPullRequestIdsTask(owner='microsoft', name='robustdg')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=2))
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
-        saved_repo = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(len(saved_repo['pull_request_ids']), saved_repo['total_pull_requests'])
 
         # test for load after repo data is loaded
         result = luigi.build([pull_request.LoadPullRequestsTask(owner='microsoft', name='robustdg')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
+        self._validate_pull_requests(case_setup)
+
+    def _validate_pull_requests(self, case_setup: CaseSetup):
         count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.PULL_REQUEST.name})
+        saved_repo = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertEqual(count, saved_repo['total_pull_requests'])
 
 

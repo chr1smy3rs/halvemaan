@@ -41,11 +41,7 @@ class LoadReactionsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request.LoadReactionsTask(owner='google', name='caliban')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-        prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST.name})
-        valid = True
-        for pr in prs:
-            valid = valid and pr['total_reactions'] == len(pr['reactions'])
-        self.assertTrue(valid)
+        self._validate_pull_requests(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when repository is in database """
@@ -59,6 +55,9 @@ class LoadReactionsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request.LoadReactionsTask(owner='google', name='cloud-forensics-utils')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
+        self._validate_pull_requests(case_setup)
+
+    def _validate_pull_requests(self, case_setup: CaseSetup):
         prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST.name})
         valid = True
         for pr in prs:

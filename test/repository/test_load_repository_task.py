@@ -36,15 +36,11 @@ class LoadRepositoryTaskTestCase(unittest.TestCase):
         result = luigi.build([repository.LoadRepositoryTask(owner='mockito', name='mockito')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
 
         result = luigi.build([repository.LoadRepositoryTask(owner='mockito', name='mockito')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
+        self._validate_repository(case_setup)
 
     def test_record_in_database_counts_mismatch(self):
         """ checks for updates when the pull request counts do not match """
@@ -64,12 +60,14 @@ class LoadRepositoryTaskTestCase(unittest.TestCase):
         result = luigi.build([repository.LoadRepositoryTask(owner='junit-team', name='junit5')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, successful_tasks=1))
-
-        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
-        self.assertEqual(1, count)
+        self._validate_repository(case_setup)
         saved_repository = case_setup.mongo_collection.find_one({'object_type': base.ObjectType.REPOSITORY.name})
         self.assertTrue(saved_repository['total_pull_requests'] > 1)
         self.assertNotEqual(saved_repository['insert_timestamp'], saved_repository['update_timestamp'])
+
+    def _validate_repository(self, case_setup: CaseSetup):
+        count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.REPOSITORY.name})
+        self.assertEqual(1, count)
 
 
 if __name__ == '__main__':

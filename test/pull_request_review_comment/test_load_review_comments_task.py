@@ -18,7 +18,7 @@ import unittest
 
 import luigi
 
-from halvemaan import base, pull_request_comment, pull_request, pull_request_review_comment, pull_request_review
+from halvemaan import base, pull_request_review_comment, pull_request_review
 from test import CaseSetup
 
 
@@ -42,9 +42,7 @@ class LoadReviewCommentsTaskTestCase(unittest.TestCase):
                                                                                  name='cloud-forensics-utils')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-
-        self.assertEqual(LoadReviewCommentsTaskTestCase._get_actual_comments(case_setup),
-                         LoadReviewCommentsTaskTestCase._get_expected_comments(case_setup))
+        self._validate_comments(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when record is in database """
@@ -57,26 +55,18 @@ class LoadReviewCommentsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review_comment.LoadReviewCommentsTask(owner='Netflix', name='mantis')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, complete_tasks=1, successful_tasks=1))
+        self._validate_comments(case_setup)
 
-        self.assertEqual(LoadReviewCommentsTaskTestCase._get_actual_comments(case_setup),
-                         LoadReviewCommentsTaskTestCase._get_expected_comments(case_setup))
-
-    @staticmethod
-    def _get_actual_comments(case_setup: CaseSetup):
-        """ find the total number of pull request comment documents in the database """
+    def _validate_comments(self, case_setup: CaseSetup):
         total_actual_comments = \
             case_setup.mongo_collection.count_documents({'object_type':
                                                         base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
 
-        return total_actual_comments
-
-    @staticmethod
-    def _get_expected_comments(case_setup: CaseSetup):
         total_expected_comments = 0
         reviews = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
         for review in reviews:
             total_expected_comments += review['total_comments']
-        return total_expected_comments
+        self.assertEqual(total_actual_comments, total_expected_comments)
 
 
 if __name__ == '__main__':

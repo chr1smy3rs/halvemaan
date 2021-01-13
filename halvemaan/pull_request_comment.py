@@ -18,7 +18,7 @@ import logging
 
 import luigi
 
-from halvemaan import content, base, user, repository, pull_request, actor
+from halvemaan import content, base, repository, pull_request, actor
 
 luigi.auto_namespace(scope=__name__)
 

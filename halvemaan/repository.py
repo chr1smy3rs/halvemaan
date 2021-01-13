@@ -259,7 +259,7 @@ class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
                       login
                     }
                     name
-                   pullRequests (first: 1, states: MERGED) { 
+                   pullRequests (first: 1) { 
                      totalCount  
                    }      
                  }
@@ -343,13 +343,13 @@ class LoadRepositoryPullRequestIdsTask(GitSingleRepositoryTask):
 
         after = ''
         if pull_request_cursor:
-            after = 'after:"' + pull_request_cursor + '", '
+            after = 'after:"' + pull_request_cursor + '"'
 
         # todo configure states dynamically.
         query = """
         {
           repository(name:\"""" + self.repository.name + """\", owner:\"""" + self.repository.owner_login + """\") {
-            pullRequests (first: 100, """ + after + """states: MERGED) { 
+            pullRequests (first: 100, """ + after + """) { 
               edges { 
                 cursor 
                 node { 

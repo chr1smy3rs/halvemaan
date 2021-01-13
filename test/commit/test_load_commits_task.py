@@ -41,7 +41,7 @@ class LoadCommitsTaskTestCase(unittest.TestCase):
         result = luigi.build([commit.LoadCommitsTask(owner='Netflix', name='dispatch-docker')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-        prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST.name})
+        self._validate_commits(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when repository is in database """
@@ -55,7 +55,18 @@ class LoadCommitsTaskTestCase(unittest.TestCase):
         result = luigi.build([commit.LoadCommitsTask(owner='Netflix', name='mantis-cli')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
-        prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.COMMIT.name})
+        self._validate_commits(case_setup)
+
+    def _validate_commits(self, case_setup: CaseSetup):
+        expected_commit_count = 0
+        actual_commit_id_count = 0
+        prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST.name})
+        for pr in prs:
+            expected_commit_count += pr['total_commits']
+            actual_commit_id_count += len(pr['commit_ids'])
+        actual_commit_count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name})
+        self.assertTrue(expected_commit_count, actual_commit_id_count)
+        self.assertTrue(expected_commit_count, actual_commit_count)
 
 
 if __name__ == '__main__':

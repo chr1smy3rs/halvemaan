@@ -40,9 +40,7 @@ class LoadReviewsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review.LoadReviewsTask(owner='Netflix', name='mantis')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-
-        self.assertEqual(LoadReviewsTaskTestCase._get_actual_reviews(case_setup),
-                         LoadReviewsTaskTestCase._get_expected_reviews(case_setup))
+        self._validate_reviews(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when record is in database """
@@ -55,25 +53,18 @@ class LoadReviewsTaskTestCase(unittest.TestCase):
         result = luigi.build([pull_request_review.LoadReviewsTask(owner='Netflix', name='dial-reference')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, complete_tasks=1, successful_tasks=1))
+        self._validate_reviews(case_setup)
 
-        self.assertEqual(LoadReviewsTaskTestCase._get_actual_reviews(case_setup),
-                         LoadReviewsTaskTestCase._get_expected_reviews(case_setup))
-
-    @staticmethod
-    def _get_actual_reviews(case_setup: CaseSetup):
+    def _validate_reviews(self, case_setup: CaseSetup):
         """ find the total number of pull request review documents in the database """
         total_actual_reviews = \
             case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
 
-        return total_actual_reviews
-
-    @staticmethod
-    def _get_expected_reviews(case_setup: CaseSetup):
         total_expected_reviews = 0
         prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST.name})
         for pr in prs:
             total_expected_reviews += pr['total_reviews']
-        return total_expected_reviews
+        self.assertEqual(total_actual_reviews, total_expected_reviews)
 
 
 if __name__ == '__main__':

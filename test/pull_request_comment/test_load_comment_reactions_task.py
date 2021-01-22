@@ -57,7 +57,7 @@ class LoadCommentReactionsTaskTestCase(unittest.TestCase):
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
         self._validate_comments(case_setup)
 
-    def _validate_comments(self, case_setup: CaseSetup) -> bool:
+    def _validate_comments(self, case_setup: CaseSetup):
         pr_comments = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_COMMENT.name})
         valid = True
         for pr_comment in pr_comments:

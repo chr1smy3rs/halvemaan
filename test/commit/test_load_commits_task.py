@@ -58,15 +58,22 @@ class LoadCommitsTaskTestCase(unittest.TestCase):
         self._validate_commits(case_setup)
 
     def _validate_commits(self, case_setup: CaseSetup):
-        expected_commit_count = 0
-        actual_commit_id_count = 0
         prs = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST.name})
+        overall_commit_ids = 0
+        overall_commits = 0
         for pr in prs:
-            expected_commit_count += pr['total_commits']
-            actual_commit_id_count += len(pr['commit_ids'])
-        actual_commit_count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name})
-        self.assertTrue(expected_commit_count, actual_commit_id_count)
-        self.assertTrue(expected_commit_count, actual_commit_count)
+            self.assertEqual(pr['total_commits'], len(pr['commit_ids']))
+            overall_commit_ids += len(pr['commit_ids'])
+            commit_counter = 0
+            for commit_id in pr['commit_ids']:
+                actual_commit = \
+                    case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name,
+                                                                 'id': commit_id})
+                self.assertEqual(1, actual_commit)
+                commit_counter += actual_commit
+                overall_commits += actual_commit
+            self.assertEqual(len(pr['commit_ids']), commit_counter)
+        self.assertEqual(overall_commits, overall_commit_ids)
 
 
 if __name__ == '__main__':

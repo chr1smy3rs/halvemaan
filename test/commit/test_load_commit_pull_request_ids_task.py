@@ -18,11 +18,11 @@ import unittest
 
 import luigi
 
-from halvemaan import commit, base, pull_request_review
+from halvemaan import pull_request, commit, base
 from test import CaseSetup
 
 
-class LoadReviewCommitsTaskTestCase(unittest.TestCase):
+class LoadCommitPullRequestIdsTaskTestCase(unittest.TestCase):
     """ Tests the loading of commits associated to pull request documents into the mongo database """
 
     def setUp(self) -> None:
@@ -33,12 +33,12 @@ class LoadReviewCommitsTaskTestCase(unittest.TestCase):
         """ checks for insert when no record is in database """
         case_setup = CaseSetup()
 
-        result = luigi.build([commit.LoadReviewCommitsTask(owner='Netflix', name='dispatch-docker')],
+        result = luigi.build([commit.LoadCommitPullRequestIdsTask(owner='Netflix', name='dispatch-docker')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue(CaseSetup.validate_result(result, total_tasks=6, successful_tasks=6))
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=12, successful_tasks=12))
 
         # test for task complete after being run successfully
-        result = luigi.build([commit.LoadReviewCommitsTask(owner='Netflix', name='dispatch-docker')],
+        result = luigi.build([commit.LoadCommitPullRequestIdsTask(owner='Netflix', name='dispatch-docker')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
         self._validate_commits(case_setup)
@@ -47,29 +47,32 @@ class LoadReviewCommitsTaskTestCase(unittest.TestCase):
         """ checks for insert when repository is in database """
         case_setup = CaseSetup()
 
-        result = luigi.build([pull_request_review.LoadReviewsTask(owner='Netflix', name='mantis')],
+        result = luigi.build([commit.LoadCommitsTask(owner='google', name='ko')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=5, successful_tasks=5))
 
-        # test for load after repo data is loaded
-        result = luigi.build([commit.LoadReviewCommitsTask(owner='Netflix', name='mantis')],
+        result = luigi.build([commit.LoadReviewCommitsTask(owner='google', name='ko')],
                              local_scheduler=True, detailed_summary=True)
-        self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=4, complete_tasks=1, successful_tasks=3))
+
+        result = luigi.build([commit.LoadReviewCommentCommitsTask(owner='google', name='ko')],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=4, complete_tasks=1, successful_tasks=3))
+
+        # test for load after repo data is loaded
+        result = luigi.build([commit.LoadCommitPullRequestIdsTask(owner='google', name='ko')],
+                             local_scheduler=True, detailed_summary=True)
+        self.assertTrue(CaseSetup.validate_result(result, total_tasks=4, successful_tasks=1, complete_tasks=3))
         self._validate_commits(case_setup)
 
     def _validate_commits(self, case_setup: CaseSetup):
-        reviews = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
-        overall_commit_ids = 0
-        overall_commits = 0
-        for review in reviews:
-            if review['commit_id']:
-                overall_commit_ids += 1
-                actual_commit = \
-                    case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name,
-                                                                 'id': review['commit_id']})
-                self.assertEqual(1, actual_commit)
-                overall_commits += actual_commit
-        self.assertEqual(overall_commits, overall_commit_ids)
+        expected_pull_request_count = 0
+        actual_pull_request_id_count = 0
+        commits = case_setup.mongo_collection.find({'object_type': base.ObjectType.COMMIT.name})
+        for item in commits:
+            expected_pull_request_count += item['total_associated_pull_requests']
+            actual_pull_request_id_count += len(item['associated_pull_request_ids'])
+        self.assertEqual(expected_pull_request_count, actual_pull_request_id_count)
 
 
 if __name__ == '__main__':

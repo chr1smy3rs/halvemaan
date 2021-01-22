@@ -58,13 +58,18 @@ class LoadReviewCommitsTaskTestCase(unittest.TestCase):
         self._validate_commits(case_setup)
 
     def _validate_commits(self, case_setup: CaseSetup):
-        expected_commit_count = 0
         comments = case_setup.mongo_collection.find({'object_type': base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
+        overall_commit_ids = 0
+        overall_commits = 0
         for comment in comments:
             if comment['commit_id']:
-                expected_commit_count += 1
-        actual_commit_count = case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name})
-        self.assertTrue(expected_commit_count, actual_commit_count)
+                overall_commit_ids += 1
+                actual_commit = \
+                    case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.COMMIT.name,
+                                                                 'id': comment['commit_id']})
+                self.assertEqual(1, actual_commit)
+                overall_commits += actual_commit
+        self.assertEqual(overall_commits, overall_commit_ids)
 
 
 if __name__ == '__main__':

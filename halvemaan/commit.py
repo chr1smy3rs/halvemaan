@@ -775,3 +775,118 @@ class LoadCommitCommentIdsTask(repository.GitSingleRepositoryTask, actor.GitActo
 
     if __name__ == '__main__':
         luigi.run()
+
+
+class LoadCommitCheckSuiteIdsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin):
+    """
+    Task for loading check suite ids for saved commits
+    """
+
+    def requires(self):
+        return [LoadCommitsTask(owner=self.owner, name=self.name),
+                LoadReviewCommitsTask(owner=self.owner, name=self.name),
+                LoadReviewCommentCommitsTask(owner=self.owner, name=self.name)]
+
+    def run(self):
+        """
+        loads the check suite ids from the commits for a specific repository
+        :return: None
+        """
+        commits_reviewed: int = 0
+
+        commit_count = self._get_objects_saved_count(self.repository, base.ObjectType.COMMIT)
+
+        commits = self._get_collection().find({'repository_id': self.repository.id,
+                                               'object_type': base.ObjectType.COMMIT.name})
+        for item in commits:
+            commit_id: str = item['id']
+            check_suites_expected: int = item['total_check_suites']
+            check_suite_ids: [str] = []
+            check_suite_cursor: str = None
+            commits_reviewed += 1
+
+            if check_suites_expected > len(item['check_suite_ids']):
+                while check_suites_expected > len(check_suite_ids):
+                    logging.debug(
+                        f'running query for check suite ids for commit [{commit_id}] against {self.repository}'
+                    )
+                    query = self._commit_check_suite_query(commit_id, check_suite_cursor)
+                    response_json = self.graph_ql_client.execute_query(query)
+                    logging.debug(
+                        f'query complete for check suite ids for commit [{commit_id}] against {self.repository}'
+                    )
+
+                    # iterate over each check suite returned (we return 100 at a time)
+                    for edge in response_json["data"]["node"]["checkSuites"]["edges"]:
+                        check_suite_cursor = edge["cursor"]
+                        check_suite_ids.append(edge["node"]["id"])
+
+                self._get_collection().update_one({'id': commit_id},
+                                                  {'$set': {'check_suite_ids': check_suite_ids}})
+
+            logging.debug(f'commits reviewed for {self.repository} {commits_reviewed}/{commit_count}')
+
+        actual_count: int = self._get_actual_results()
+        expected_count: int = self._get_expected_results()
+        logging.debug(
+            f'check suites returned for {self.repository} returned: [{actual_count}], expected: [{expected_count}]'
+        )
+
+    def _get_expected_results(self):
+        """
+        always find the expected number of check suites for the entire repository
+        :return: 0
+        """
+        logging.debug(f'running count query for expected check suite ids for the commits in {self.repository}')
+        commits = self._get_collection().find({'repository_id': self.repository.id,
+                                               'object_type': base.ObjectType.COMMIT.name})
+        expected_count: int = 0
+        for item in commits:
+            expected_count += item['total_check_suites']
+        logging.debug(f'count query complete for expected check suite ids [count: {expected_count}] '
+                      f'for the commits in {self.repository}')
+        return expected_count
+
+    def _get_actual_results(self):
+        """
+        returns the number of saved check suite ids related to commits...
+        :return: integer number
+        """
+        logging.debug(f'running count query for actual check suite ids for the commits in {self.repository}')
+        commits = self._get_collection().find({'repository_id': self.repository.id,
+                                               'object_type': base.ObjectType.COMMIT.name})
+        actual_count: int = 0
+        for item in commits:
+            actual_count += len(item['check_suite_ids'])
+        logging.debug(f'count query complete for actual check suite ids [count: {actual_count}] '
+                      f'for the commits in {self.repository}')
+        return actual_count
+
+    @staticmethod
+    def _commit_check_suite_query(commit_id: str, check_suite_cursor: str) -> str:
+        # static method for getting the query for a specific commit
+
+        after = ''
+        if check_suite_cursor:
+            after = ', after:"' + check_suite_cursor + '", '
+
+        query = """
+        {
+          node(id: \"""" + commit_id + """\") {
+            ... on Commit {
+              checkSuites(first: 100""" + after + """) {
+                edges {
+                  cursor
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        return query
+
+    if __name__ == '__main__':
+        luigi.run()

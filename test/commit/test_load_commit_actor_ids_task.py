@@ -18,7 +18,7 @@ import unittest
 
 import luigi
 
-from halvemaan import pull_request, commit, base
+from halvemaan import commit, base
 from test import CaseSetup
 
 

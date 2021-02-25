@@ -45,7 +45,7 @@ class CheckSuite:
         # commit [MDY6Q29tbWl0NjIwNzE2NzoxMDA3NjBmMWFlMDJmZGZkYTczNGZiNDM2ODA1MmZiNzg5ZmFlOGRm]
         # failed request [{'errors': [{'message': 'Something went wrong while executing your query.
         # Please include `C023:6502:43B2854:708AD98:5FD04E4C` when reporting this issue.'}]}]
-        # self.push_id: str = None
+        self.push_id: str = None
         self.state: str = None
 
     def __str__(self) -> str:
@@ -73,7 +73,7 @@ class CheckSuite:
             'conclusion': self.conclusion,
             'total_matching_pull_requests': self.total_matching_pull_requests,
             'matching_pull_request_ids': self.matching_pull_request_ids,
-            # 'push_id': self.push_id,
+            'push_id': self.push_id,
             'state': self.state,
             'object_type': self.object_type.name
         }
@@ -85,9 +85,7 @@ class LoadCommitCheckSuitesTask(repository.GitSingleRepositoryTask, actor.GitAct
     """
 
     def requires(self):
-        return [commit.LoadCommitsTask(owner=self.owner, name=self.name),
-                commit.LoadReviewCommitsTask(owner=self.owner, name=self.name),
-                commit.LoadReviewCommentCommitsTask(owner=self.owner, name=self.name)]
+        return [commit.LoadCommitCheckSuiteIdsTask(owner=self.owner, name=self.name)]
 
     def run(self):
         """
@@ -101,55 +99,46 @@ class LoadCommitCheckSuitesTask(repository.GitSingleRepositoryTask, actor.GitAct
         commits = self._get_collection().find({'repository_id': self.repository.id,
                                                'object_type': base.ObjectType.COMMIT.name})
         for item in commits:
-            commit_id: str = item['id']
-            check_suites_expected: int = item['total_check_suites']
-            check_suite_ids: [str] = []
-            check_suite_cursor: str = None
             commits_reviewed += 1
 
-            if check_suites_expected > len(item['check_suite_ids']):
-                while check_suites_expected > len(check_suite_ids):
+            for check_suite_id in item['check_suite_ids']:
+
+                # check to see if pull request comment is in the database
+                found_request = \
+                    self._get_collection().find_one({'id': check_suite_id,
+                                                     'object_type': base.ObjectType.CHECK_SUITE.name})
+                if found_request is None:
                     logging.debug(
-                        f'running query for check suite ids for commit [{commit_id}] against {self.repository}'
+                        f'running query for check suite for id [{check_suite_id}] against {self.repository}'
                     )
-                    query = self._commit_check_suite_query(commit_id, check_suite_cursor)
+                    query = self._commit_check_suite_query(check_suite_id)
                     response_json = self.graph_ql_client.execute_query(query)
                     logging.debug(
-                        f'query complete for check suite ids for commit [{commit_id}] against {self.repository}'
+                        f'query complete for check suite for id [{check_suite_id}] against {self.repository}'
                     )
 
-                    # iterate over each check suite returned (we return 100 at a time)
-                    for edge in response_json["data"]["node"]["checkSuites"]["edges"]:
-                        check_suite_cursor = edge["cursor"]
-                        check_suite = CheckSuite(edge["node"]["id"])
-                        check_suite.commit_id = edge["node"]["commit"]["id"]
-                        check_suite.repository_id = edge["node"]["repository"]["id"]
-                        if edge["node"]["app"] is not None:
-                            check_suite.application_id = edge["node"]["app"]["id"]
-                        if edge["node"]["branch"] is not None:
-                            check_suite.branch_id = edge["node"]["branch"]["id"]
-                        check_suite.conclusion = edge["node"]["conclusion"]
-                        # check_suite.push_id = edge["node"]["push"]["id"]
-                        check_suite.state = edge["node"]["status"]
+                    check_suite = CheckSuite(response_json["data"]["node"]["id"])
+                    check_suite.commit_id = response_json["data"]["node"]["commit"]["id"]
+                    check_suite.repository_id = response_json["data"]["node"]["repository"]["id"]
+                    if response_json["data"]["node"]["app"] is not None:
+                        check_suite.application_id = response_json["data"]["node"]["app"]["id"]
+                    if response_json["data"]["node"]["branch"] is not None:
+                        check_suite.branch_id = response_json["data"]["node"]["branch"]["id"]
+                    check_suite.conclusion = response_json["data"]["node"]["conclusion"]
+                    if response_json["data"]["node"]["push"] is not None:
+                        check_suite.push_id = response_json["data"]["node"]["push"]["id"]
+                    check_suite.state = response_json["data"]["node"]["status"]
 
-                        # load the counts
-                        check_suite.total_check_runs = edge["node"]["checkRuns"]["totalCount"]
-                        check_suite.total_matching_pull_requests = edge["node"]["matchingPullRequests"]["totalCount"]
+                    # load the counts
+                    check_suite.total_check_runs = response_json["data"]["node"]["checkRuns"]["totalCount"]
+                    check_suite.total_matching_pull_requests = \
+                        response_json["data"]["node"]["matchingPullRequests"]["totalCount"]
 
-                        # parse the datetime
-                        check_suite.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
+                    # parse the datetime
+                    check_suite.create_datetime = \
+                        base.to_datetime_from_str(response_json["data"]["node"]["createdAt"])
 
-                        check_suite_ids.append(check_suite.id)
-
-                        # check to see if pull request comment is in the database
-                        found_request = \
-                            self._get_collection().find_one({'id': check_suite.id,
-                                                             'object_type': base.ObjectType.CHECK_SUITE.name})
-                        if found_request is None:
-                            self._get_collection().insert_one(check_suite.to_dictionary())
-
-                self._get_collection().update_one({'id': commit_id},
-                                                  {'$set': {'check_suite_ids': check_suite_ids}})
+                    self._get_collection().insert_one(check_suite.to_dictionary())
 
             logging.debug(f'commits reviewed for {self.repository} {commits_reviewed}/{commit_count}')
 
@@ -169,65 +158,54 @@ class LoadCommitCheckSuitesTask(repository.GitSingleRepositoryTask, actor.GitAct
                                                'object_type': base.ObjectType.COMMIT.name})
         expected_count: int = 0
         for item in commits:
-            expected_count += item['total_check_suites']
+            expected_count += len(item['check_suite_ids'])
         logging.debug(f'count query complete for expected check suite ids for the commits in {self.repository}')
         return expected_count
 
     def _get_actual_results(self):
         """
-        returns the number of saved check suite ids related to commits...
+        returns the number of saved check suites related to commits...
         :return: integer number
         """
         logging.debug(f'running count query for actual check suite ids for the commits in {self.repository}')
-        commits = self._get_collection().find({'repository_id': self.repository.id,
-                                               'object_type': base.ObjectType.COMMIT.name})
-        actual_count: int = 0
-        for item in commits:
-            actual_count += len(item['check_suite_ids'])
+        actual_count = self._get_collection().count_documents({'repository_id': self.repository.id,
+                                                               'object_type': base.ObjectType.CHECK_SUITE.name})
         logging.debug(f'count query complete for actual check suite ids for the commits in {self.repository}')
         return actual_count
 
     @staticmethod
-    def _commit_check_suite_query(commit_id: str, check_suite_cursor: str) -> str:
+    def _commit_check_suite_query(check_suite_id: str) -> str:
         # static method for getting the query for a specific commit
-
-        after = ''
-        if check_suite_cursor:
-            after = ', after:"' + check_suite_cursor + '", '
 
         query = """
         {
-          node(id: \"""" + commit_id + """\") {
-            ... on Commit {
-              checkSuites(first: 100""" + after + """) {
-                edges {
-                  cursor
-                  node {
-                    id
-                    app {
-                      id
-                    }
-                    branch {
-                      id
-                    }
-                    commit {
-                      id
-                    }
-                    checkRuns(first:1) {
-                      totalCount
-                    }
-                    conclusion 
-                    createdAt
-                    matchingPullRequests(first:1) {
-                      totalCount
-                    }
-                    repository {
-                      id
-                    }
-                    status
-                  }
-                }
+          node(id: \"""" + check_suite_id + """\") {
+            ... on CheckSuite {
+              id
+              app {
+                id
               }
+              branch {
+                id
+              }
+              commit {
+                id
+              }
+              checkRuns(first: 1) {
+                totalCount
+              }
+              conclusion
+              createdAt
+              matchingPullRequests(first: 1) {
+                totalCount
+              }
+              push {
+                id
+              }
+              repository {
+                id
+              }
+              status
             }
           }
         }

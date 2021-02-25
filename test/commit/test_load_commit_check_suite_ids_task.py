@@ -18,11 +18,11 @@ import unittest
 
 import luigi
 
-from halvemaan import pull_request, commit, base
+from halvemaan import commit, base
 from test import CaseSetup
 
 
-class LoadCommitPullRequestIdsTaskTestCase(unittest.TestCase):
+class LoadCommitCheckSuiteIdsTaskTestCase(unittest.TestCase):
     """ Tests the loading of commits associated to pull request documents into the mongo database """
 
     def setUp(self) -> None:
@@ -66,13 +66,13 @@ class LoadCommitPullRequestIdsTaskTestCase(unittest.TestCase):
         self._validate_commits(case_setup)
 
     def _validate_commits(self, case_setup: CaseSetup):
-        expected_pull_request_count = 0
-        actual_pull_request_id_count = 0
+        expected_check_suite_count = 0
+        actual_check_suite_id_count = 0
         commits = case_setup.mongo_collection.find({'object_type': base.ObjectType.COMMIT.name})
         for item in commits:
-            expected_pull_request_count += item['total_check_suites']
-            actual_pull_request_id_count += len(item['check_suite_ids'])
-        self.assertEqual(expected_pull_request_count, actual_pull_request_id_count)
+            expected_check_suite_count += item['total_check_suites']
+            actual_check_suite_id_count += len(item['check_suite_ids'])
+        self.assertEqual(expected_check_suite_count, actual_check_suite_id_count)
 
 
 if __name__ == '__main__':

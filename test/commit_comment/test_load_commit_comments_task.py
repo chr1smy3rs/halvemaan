@@ -22,8 +22,8 @@ from halvemaan import pull_request, commit, base, commit_check_suite
 from test import CaseSetup
 
 
-class LoadCommitCheckSuitesTaskTestCase(unittest.TestCase):
-    """ Tests the loading of check suites associated to comments into the mongo database """
+class LoadCommitCommentsTaskTestCase(unittest.TestCase):
+    """ Tests the loading of commits associated to pull request documents into the mongo database """
 
     def setUp(self) -> None:
         case_setup = CaseSetup()

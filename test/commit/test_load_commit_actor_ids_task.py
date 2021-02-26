@@ -23,7 +23,7 @@ from test import CaseSetup
 
 
 class LoadCommitActorIdsTaskTestCase(unittest.TestCase):
-    """ Tests the loading of commits associated to pull request documents into the mongo database """
+    """ Tests the loading of actor ids associated to commit documents into the mongo database """
 
     def setUp(self) -> None:
         case_setup = CaseSetup()

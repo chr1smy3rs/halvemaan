@@ -114,82 +114,10 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
         pull_request_reviews = self._get_collection().find({'repository_id': self.repository.id,
                                                            'object_type': base.ObjectType.PULL_REQUEST_REVIEW.name})
         for review in pull_request_reviews:
-            pull_request_review_id: str = review['id']
-            pull_request_id: str = review['pull_request_id']
             pull_request_reviews_reviewed += 1
 
             for comment_id in review['comment_ids']:
-
-                # check to see if pull request comment is in the database
-                found_request = \
-                    self._get_collection().find_one({'id': comment_id, 'object_type':
-                                                    base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
-                if found_request is None:
-
-                    logging.debug(
-                        f'running query for comment [{comment_id}] for pull request review [{pull_request_review_id}] '
-                        f'against {self.repository}'
-                    )
-                    query = self._pull_request_review_comments_query(comment_id)
-                    response_json = self.graph_ql_client.execute_query(query)
-                    logging.debug(
-                        f'query complete for comment [{comment_id}]  for pull request review [{pull_request_review_id}] '
-                        f'against {self.repository}'
-                    )
-
-                    edge = response_json["data"]
-                    comment = PullRequestReviewComment(edge["node"]["id"])
-                    comment.repository_id = edge["node"]["repository"]["id"]
-                    comment.pull_request_id = pull_request_id
-                    comment.pull_request_review_id = pull_request_review_id
-                    comment.state = edge["node"]["state"]
-
-                    # get the body text
-                    comment.body_text = edge["node"]["bodyText"]
-
-                    # get the counts for the sub items to comment
-                    comment.total_reactions = edge["node"]["reactions"]["totalCount"]
-                    comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
-
-                    # parse the datetime
-                    comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
-
-                    # set the diffHunk
-                    comment.diff_hunk = edge["node"]["diffHunk"]
-
-                    # set the path
-                    comment.path = edge["node"]["path"]
-
-                    # set the original position
-                    if edge["node"]["originalPosition"] is not None:
-                        comment.original_position = edge["node"]["originalPosition"]
-
-                    # set the position
-                    if edge["node"]["position"] is not None:
-                        comment.position = edge["node"]["position"]
-
-                    # set if the comment has been minimized
-                    if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
-                        comment.minimized_status = edge["node"]["minimizedReason"]
-
-                    # author can be None.  Who knew?
-                    if edge["node"]["author"] is not None:
-                        comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
-                    comment.author_association = edge["node"]['authorAssociation']
-
-                    # get original commit id
-                    if edge["node"]["originalCommit"] is not None:
-                        comment.original_commit_id = edge["node"]["originalCommit"]["id"]
-
-                    # get commit id
-                    if edge["node"]["commit"] is not None:
-                        comment.commit_id = edge["node"]["commit"]["id"]
-
-                    # get author of comment we are replying to
-                    if edge["node"]["replyTo"] is not None:
-                        comment.reply_to_comment_id = edge["node"]["replyTo"]["id"]
-
-                    self._get_collection().insert_one(comment.to_dictionary())
+                self._build_and_insert_pull_request_review_comment(comment_id)
 
             logging.debug(f'pull request reviews reviewed for {self.repository} '
                           f'{pull_request_reviews_reviewed}/{pull_request_review_count}')
@@ -198,6 +126,73 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
         expected_count: int = self._get_expected_results()
         logging.debug(f'comments returned for {self.repository} '
                       f'returned: [{actual_count}], expected: [{expected_count}]')
+
+    def _build_and_insert_pull_request_review_comment(self, comment_id: str):
+
+        # check to see if pull request comment is in the database
+        found_request = \
+            self._get_collection().find_one({'id': comment_id, 'object_type':
+                                            base.ObjectType.PULL_REQUEST_REVIEW_COMMENT.name})
+        if found_request is None:
+
+            logging.debug(f'running query for comment [{comment_id}] against {self.repository}')
+            query = self._pull_request_review_comments_query(comment_id)
+            response_json = self.graph_ql_client.execute_query(query)
+            logging.debug(f'query complete for comment [{comment_id}] against {self.repository}')
+
+            edge = response_json["data"]
+            comment = PullRequestReviewComment(edge["node"]["id"])
+            comment.repository_id = edge["node"]["repository"]["id"]
+            comment.pull_request_id = edge["node"]["pullRequestReview"]["id"]
+            comment.pull_request_review_id = edge["node"]["pullRequestReview"]["pullRequest"]["id"]
+            comment.state = edge["node"]["state"]
+
+            # get the body text
+            comment.body_text = edge["node"]["bodyText"]
+
+            # get the counts for the sub items to comment
+            comment.total_reactions = edge["node"]["reactions"]["totalCount"]
+            comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
+
+            # parse the datetime
+            comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
+
+            # set the diffHunk
+            comment.diff_hunk = edge["node"]["diffHunk"]
+
+            # set the path
+            comment.path = edge["node"]["path"]
+
+            # set the original position
+            if edge["node"]["originalPosition"] is not None:
+                comment.original_position = edge["node"]["originalPosition"]
+
+            # set the position
+            if edge["node"]["position"] is not None:
+                comment.position = edge["node"]["position"]
+
+            # set if the comment has been minimized
+            if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
+                comment.minimized_status = edge["node"]["minimizedReason"]
+
+            # author can be None.  Who knew?
+            if edge["node"]["author"] is not None:
+                comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
+            comment.author_association = edge["node"]['authorAssociation']
+
+            # get original commit id
+            if edge["node"]["originalCommit"] is not None:
+                comment.original_commit_id = edge["node"]["originalCommit"]["id"]
+
+            # get commit id
+            if edge["node"]["commit"] is not None:
+                comment.commit_id = edge["node"]["commit"]["id"]
+
+            # get author of comment we are replying to
+            if edge["node"]["replyTo"] is not None:
+                comment.reply_to_comment_id = edge["node"]["replyTo"]["id"]
+
+            self._get_collection().insert_one(comment.to_dictionary())
 
     def _get_expected_results(self):
         """
@@ -233,6 +228,12 @@ class LoadReviewCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
           node(id: \"""" + pull_request_review_comment_id + """\") {
             ... on PullRequestReviewComment {
               id
+              pullRequestReview {
+                id
+                pullRequest {
+                  id
+                }
+              }
               author {
                 login
               }

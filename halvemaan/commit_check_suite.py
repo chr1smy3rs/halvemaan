@@ -102,43 +102,7 @@ class LoadCommitCheckSuitesTask(repository.GitSingleRepositoryTask, actor.GitAct
             commits_reviewed += 1
 
             for check_suite_id in item['check_suite_ids']:
-
-                # check to see if pull request comment is in the database
-                found_request = \
-                    self._get_collection().find_one({'id': check_suite_id,
-                                                     'object_type': base.ObjectType.CHECK_SUITE.name})
-                if found_request is None:
-                    logging.debug(
-                        f'running query for check suite for id [{check_suite_id}] against {self.repository}'
-                    )
-                    query = self._commit_check_suite_query(check_suite_id)
-                    response_json = self.graph_ql_client.execute_query(query)
-                    logging.debug(
-                        f'query complete for check suite for id [{check_suite_id}] against {self.repository}'
-                    )
-
-                    check_suite = CheckSuite(response_json["data"]["node"]["id"])
-                    check_suite.commit_id = response_json["data"]["node"]["commit"]["id"]
-                    check_suite.repository_id = response_json["data"]["node"]["repository"]["id"]
-                    if response_json["data"]["node"]["app"] is not None:
-                        check_suite.application_id = response_json["data"]["node"]["app"]["id"]
-                    if response_json["data"]["node"]["branch"] is not None:
-                        check_suite.branch_id = response_json["data"]["node"]["branch"]["id"]
-                    check_suite.conclusion = response_json["data"]["node"]["conclusion"]
-                    if response_json["data"]["node"]["push"] is not None:
-                        check_suite.push_id = response_json["data"]["node"]["push"]["id"]
-                    check_suite.state = response_json["data"]["node"]["status"]
-
-                    # load the counts
-                    check_suite.total_check_runs = response_json["data"]["node"]["checkRuns"]["totalCount"]
-                    check_suite.total_matching_pull_requests = \
-                        response_json["data"]["node"]["matchingPullRequests"]["totalCount"]
-
-                    # parse the datetime
-                    check_suite.create_datetime = \
-                        base.to_datetime_from_str(response_json["data"]["node"]["createdAt"])
-
-                    self._get_collection().insert_one(check_suite.to_dictionary())
+                self._build_and_insert_commit_check_suite(check_suite_id)
 
             logging.debug(f'commits reviewed for {self.repository} {commits_reviewed}/{commit_count}')
 
@@ -147,6 +111,45 @@ class LoadCommitCheckSuitesTask(repository.GitSingleRepositoryTask, actor.GitAct
         logging.debug(
             f'check suites returned for {self.repository} returned: [{actual_count}], expected: [{expected_count}]'
         )
+
+    def _build_and_insert_commit_check_suite(self, check_suite_id: str):
+
+        # check to see if pull request comment is in the database
+        found_request = \
+            self._get_collection().find_one({'id': check_suite_id,
+                                             'object_type': base.ObjectType.CHECK_SUITE.name})
+        if found_request is None:
+            logging.debug(
+                f'running query for check suite for id [{check_suite_id}] against {self.repository}'
+            )
+            query = self._commit_check_suite_query(check_suite_id)
+            response_json = self.graph_ql_client.execute_query(query)
+            logging.debug(
+                f'query complete for check suite for id [{check_suite_id}] against {self.repository}'
+            )
+
+            check_suite = CheckSuite(response_json["data"]["node"]["id"])
+            check_suite.commit_id = response_json["data"]["node"]["commit"]["id"]
+            check_suite.repository_id = response_json["data"]["node"]["repository"]["id"]
+            if response_json["data"]["node"]["app"] is not None:
+                check_suite.application_id = response_json["data"]["node"]["app"]["id"]
+            if response_json["data"]["node"]["branch"] is not None:
+                check_suite.branch_id = response_json["data"]["node"]["branch"]["id"]
+            check_suite.conclusion = response_json["data"]["node"]["conclusion"]
+            if response_json["data"]["node"]["push"] is not None:
+                check_suite.push_id = response_json["data"]["node"]["push"]["id"]
+            check_suite.state = response_json["data"]["node"]["status"]
+
+            # load the counts
+            check_suite.total_check_runs = response_json["data"]["node"]["checkRuns"]["totalCount"]
+            check_suite.total_matching_pull_requests = \
+                response_json["data"]["node"]["matchingPullRequests"]["totalCount"]
+
+            # parse the datetime
+            check_suite.create_datetime = \
+                base.to_datetime_from_str(response_json["data"]["node"]["createdAt"])
+
+            self._get_collection().insert_one(check_suite.to_dictionary())
 
     def _get_expected_results(self):
         """

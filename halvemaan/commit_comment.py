@@ -92,65 +92,63 @@ class LoadCommitCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
         commits = self._get_collection().find({'repository_id': self.repository.id,
                                                'object_type': base.ObjectType.COMMIT.name})
         for item in commits:
-            commit_id: str = item['id']
             commits_reviewed += 1
 
             for comment_id in item['comment_ids']:
+                self._build_and_insert_commit_comment(comment_id)
 
-                # check to see if commit comment is in the database
-                found_request = \
-                    self._get_collection().find_one({'id': comment_id,
-                                                     'object_type': base.ObjectType.COMMIT_COMMENT.name})
-                if found_request is None:
-                    logging.debug(
-                        f'running query for comments for commit [{commit_id}] against {self.repository}'
-                    )
-                    query = self._commit_comment_query(commit_id)
-                    response_json = self.graph_ql_client.execute_query(query)
-                    logging.debug(
-                        f'query complete for comments for commit [{commit_id}] against {self.repository}'
-                    )
-
-                    edge = response_json["data"]
-                    commit_comment = CommitComment(edge["node"]["id"])
-                    commit_comment.repository_id = edge["node"]["repository"]["id"]
-                    commit_comment.commit_id = commit_id
-
-                    # get the counts for the sub items to comment
-                    commit_comment.total_reactions = edge["node"]["reactions"]["totalCount"]
-                    commit_comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
-
-                    # get the body text
-                    commit_comment.body_text = edge["node"]["bodyText"]
-
-                    # parse the datetime
-                    commit_comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
-
-                    # set the path
-                    commit_comment.path = edge["node"]["path"]
-
-                    # author can be None.  Who knew?
-                    if edge["node"]["author"] is not None:
-                        commit_comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
-                    commit_comment.author_association = edge["node"]['authorAssociation']
-
-                    # set the position
-                    if edge["node"]["position"] is not None:
-                        commit_comment.position = edge["node"]["position"]
-
-                    # set if the comment has been minimized
-                    if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
-                        commit_comment.minimized_status = edge["node"]["minimizedReason"]
-
-                    self._get_collection().insert_one(commit_comment.to_dictionary())
-
-            logging.debug(f'pull requests reviewed for {self.repository} {commits_reviewed}/{commit_count}')
+            logging.debug(f'commits reviewed for {self.repository} {commits_reviewed}/{commit_count}')
 
         actual_count: int = self._get_actual_results()
         expected_count: int = self._get_expected_results()
         logging.debug(
-            f'participants returned for {self.repository} returned: [{actual_count}], expected: [{expected_count}]'
+            f'comments returned for {self.repository} returned: [{actual_count}], expected: [{expected_count}]'
         )
+
+    def _build_and_insert_commit_comment(self, comment_id: str):
+
+        # check to see if commit comment is in the database
+        found_request = \
+            self._get_collection().find_one({'id': comment_id,
+                                             'object_type': base.ObjectType.COMMIT_COMMENT.name})
+        if found_request is None:
+            logging.debug(f'running query for comment [{comment_id}] against {self.repository}')
+            query = self._commit_comment_query(comment_id)
+            response_json = self.graph_ql_client.execute_query(query)
+            logging.debug(f'query complete for comments for commit [{comment_id}] against {self.repository}')
+
+            edge = response_json["data"]
+            commit_comment = CommitComment(edge["node"]["id"])
+            commit_comment.repository_id = edge["node"]["repository"]["id"]
+            commit_comment.commit_id = edge["node"]["commit"]["id"]
+
+            # get the counts for the sub items to comment
+            commit_comment.total_reactions = edge["node"]["reactions"]["totalCount"]
+            commit_comment.total_edits = edge["node"]["userContentEdits"]["totalCount"]
+
+            # get the body text
+            commit_comment.body_text = edge["node"]["bodyText"]
+
+            # parse the datetime
+            commit_comment.create_datetime = base.to_datetime_from_str(edge["node"]["createdAt"])
+
+            # set the path
+            commit_comment.path = edge["node"]["path"]
+
+            # author can be None.  Who knew?
+            if edge["node"]["author"] is not None:
+                commit_comment.author = self._find_actor_by_login(edge["node"]["author"]["login"])
+            commit_comment.author_association = edge["node"]['authorAssociation']
+
+            # set the position
+            if edge["node"]["position"] is not None:
+                commit_comment.position = edge["node"]["position"]
+
+            # set if the comment has been minimized
+            if edge["node"]["isMinimized"] is not None and edge["node"]["isMinimized"] is True:
+                commit_comment.minimized_status = edge["node"]["minimizedReason"]
+
+            self._get_collection().insert_one(commit_comment.to_dictionary())
 
     def _get_expected_results(self):
         """
@@ -186,6 +184,9 @@ class LoadCommitCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
                 login
               }
               authorAssociation
+              commit {
+                id
+              }
               repository {
                 id
               }
@@ -211,7 +212,7 @@ class LoadCommitCommentsTask(repository.GitSingleRepositoryTask, actor.GitActorL
         luigi.run()
 
 
-class LoadCommitCommentEditsTask(content.GitSingleMongoEditsTask):
+class LoadCommitCommentEditsTask(content.GitSingleRepositoryEditsTask):
     """
     Task for loading edits for stored commit comments
     """
@@ -268,7 +269,7 @@ class LoadCommitCommentEditsTask(content.GitSingleMongoEditsTask):
         luigi.run()
 
 
-class LoadCommitCommentReactionsTask(content.GitSingleMongoReactionsTask):
+class LoadCommitCommentReactionsTask(content.GitSingleRepositoryReactionsTask):
     """
     Task for loading reactions for stored commit comments
     """

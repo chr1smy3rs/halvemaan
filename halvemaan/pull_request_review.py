@@ -342,7 +342,7 @@ class LoadReviewCommentIdsTask(repository.GitSingleRepositoryTask, actor.GitActo
         luigi.run()
 
 
-class LoadReviewEditsTask(content.GitSingleMongoEditsTask):
+class LoadReviewEditsTask(content.GitSingleRepositoryEditsTask):
     """
     Task for loading edits for stored pull request reviews
     """
@@ -399,7 +399,7 @@ class LoadReviewEditsTask(content.GitSingleMongoEditsTask):
         luigi.run()
 
 
-class LoadReviewReactionsTask(content.GitSingleMongoReactionsTask):
+class LoadReviewReactionsTask(content.GitSingleRepositoryReactionsTask):
     """
     Task for loading reactions for stored pull request reviews
     """

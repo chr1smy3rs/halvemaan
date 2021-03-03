@@ -18,7 +18,7 @@ import unittest
 
 import luigi
 
-from halvemaan import pull_request, commit, base, commit_check_suite
+from halvemaan import commit, base, commit_check_suite
 from test import CaseSetup
 
 
@@ -41,7 +41,7 @@ class LoadCommitCheckSuitesTaskTestCase(unittest.TestCase):
         result = luigi.build([commit_check_suite.LoadCommitCheckSuitesTask(owner='Netflix', name='dispatch-docker')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=1, complete_tasks=1))
-        self._validate_commits(case_setup)
+        self._validate_check_suites(case_setup)
 
     def test_record_in_database(self):
         """ checks for insert when repository is in database """
@@ -55,16 +55,16 @@ class LoadCommitCheckSuitesTaskTestCase(unittest.TestCase):
         result = luigi.build([commit_check_suite.LoadCommitCheckSuitesTask(owner='google', name='ko')],
                              local_scheduler=True, detailed_summary=True)
         self.assertTrue(CaseSetup.validate_result(result, total_tasks=2, successful_tasks=1, complete_tasks=1))
-        self._validate_commits(case_setup)
+        self._validate_check_suites(case_setup)
 
-    def _validate_commits(self, case_setup: CaseSetup):
-        expected_pull_request_count = 0
-        actual_pull_request_id_count = 0
+    def _validate_check_suites(self, case_setup: CaseSetup):
+        expected_check_suite_count = 0
+        actual_check_suite_count = \
+            case_setup.mongo_collection.count_documents({'object_type': base.ObjectType.CHECK_SUITE.name})
         commits = case_setup.mongo_collection.find({'object_type': base.ObjectType.COMMIT.name})
         for item in commits:
-            expected_pull_request_count += item['total_check_suites']
-            actual_pull_request_id_count += len(item['check_suite_ids'])
-        self.assertEqual(expected_pull_request_count, actual_pull_request_id_count)
+            expected_check_suite_count += len(item['check_suite_ids'])
+        self.assertEqual(expected_check_suite_count, actual_check_suite_count)
 
 
 if __name__ == '__main__':

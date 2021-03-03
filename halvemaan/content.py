@@ -55,7 +55,8 @@ class ContentEdit:
         }
 
 
-class GitSingleMongoEditsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, metaclass=abc.ABCMeta):
+class GitSingleRepositoryEditsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                   metaclass=abc.ABCMeta):
     """
     base task for loading edits for stored documents
     """
@@ -190,7 +191,8 @@ class Reaction:
         }
 
 
-class GitSingleMongoReactionsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin, metaclass=abc.ABCMeta):
+class GitSingleRepositoryReactionsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMixin,
+                                       metaclass=abc.ABCMeta):
     """
     base task for loading reactions for stored documents
     """

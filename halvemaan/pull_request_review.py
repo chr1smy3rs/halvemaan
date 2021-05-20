@@ -142,7 +142,8 @@ class LoadReviewsTask(repository.GitSingleRepositoryTask, actor.GitActorLookupMi
             review.pull_request_id = edge["node"]["pullRequest"]["id"]
             review.repository_id = edge["node"]["repository"]["id"]
             review.body_text = edge["node"]["bodyText"]
-            review.commit_id = edge["node"]["commit"]["id"]
+            if edge["node"]["commit"] is not None:
+                review.commit_id = edge["node"]["commit"]["id"]
             review.total_comments = edge["node"]["comments"]["totalCount"]
             review.total_edits = edge["node"]["userContentEdits"]["totalCount"]
             review.total_reactions = edge["node"]["reactions"]["totalCount"]

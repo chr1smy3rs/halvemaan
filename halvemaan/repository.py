@@ -304,9 +304,12 @@ class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMi
         """
 
         repository_cursor: str = None
+        has_next_page: bool = False
+        if self._get_expected_results() > 0:
+            has_next_page = True
 
         # continue executing gets against git until we have all the repositories
-        while self._get_actual_results() != self._get_expected_results():
+        while has_next_page:
 
             logging.debug(f'running query for Repository: [query: {self.query}]')
             search_query = self._search_query(repository_cursor)
@@ -314,6 +317,8 @@ class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMi
             logging.debug(f'query complete for Repository: [query: {self.query}]')
 
             if response_json["data"]["search"] is not None:
+
+                has_next_page = response_json["data"]["search"]["pageInfo"]["hasNextPage"]
 
                 for edge in response_json["data"]["search"]["edges"]:
                     repository_cursor = edge["cursor"]
@@ -384,13 +389,16 @@ class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMi
 
         after = ''
         if repository_cursor:
-            after = 'after:"' + repository_cursor + '"'
+            after = ', after:"' + repository_cursor + '"'
 
         search_query = """
                 {
-                  search(query: \"""" + self.query + """\", type: REPOSITORY, first: 100, """ + after + """) {
+                  search(query: \"""" + self.query + """\", type: REPOSITORY, first: 100""" + after + """) {
                     repositoryCount
-                    edges {
+                    pageInfo {
+                      hasNextPage
+                    }
+                    edges { 
                       cursor
                       node {
                         ... on Repository {

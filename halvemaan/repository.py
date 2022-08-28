@@ -38,6 +38,8 @@ class Repository:
         self.owner: actor.Actor = actor.Actor('', actor.ActorType.UNKNOWN)
         self.total_pull_requests: int = 0
         self.pull_request_ids: [str] = []
+        self.is_fork: bool = False
+        self.fork_count: int = 0
         self.insert_datetime: datetime = datetime.now()
         self.update_datetime: datetime = datetime.now()
         self.object_type: base.ObjectType = base.ObjectType.REPOSITORY
@@ -61,6 +63,8 @@ class Repository:
             'owner': self.owner.to_dictionary(),
             'total_pull_requests': self.total_pull_requests,
             'pull_request_ids': self.pull_request_ids,
+            'is_fork': self.is_fork,
+            'fork_count': self.fork_count,
             'insert_timestamp': self.insert_datetime,
             'update_timestamp': self.update_datetime,
             'object_type': self.object_type.name
@@ -75,6 +79,8 @@ class Repository:
         repository.name = json['name']
         repository.total_pull_requests = json['total_pull_requests']
         repository.pull_request_ids = json['pull_request_ids']
+        repository.is_fork = json['is_fork']
+        repository.fork_count = json['fork_count']
         repository.insert_datetime = json['insert_timestamp']
         repository.update_datetime = json['update_timestamp']
         return repository
@@ -196,6 +202,8 @@ class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
                 repository.owner_login = response_json["data"]["repository"]["owner"]["login"]
                 repository.owner = self._find_actor_by_id(response_json["data"]["repository"]["owner"]["id"])
                 repository.name = response_json["data"]["repository"]["name"]
+                repository.is_fork = response_json["data"]["repository"]["isFork"]
+                repository.fork_count = response_json["data"]["repository"]["forkCount"]
                 repository.total_pull_requests = response_json["data"]["repository"]["pullRequests"]["totalCount"]
 
                 logging.debug(f'inserting record for {repository}')
@@ -204,8 +212,10 @@ class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
 
             else:
                 total_pull_requests = response_json["data"]["repository"]["pullRequests"]["totalCount"]
+                fork_count = response_json["data"]["repository"]["forkCount"]
                 update_timestamp = datetime.now()
-                set_dictionary = {'total_pull_requests': total_pull_requests, 'update_timestamp': update_timestamp}
+                set_dictionary = {'total_pull_requests': total_pull_requests, 'fork_count': fork_count,
+                                  'update_timestamp': update_timestamp}
                 logging.debug(f'updating record for Repository: [owner: {self.owner} name: {self.name}]')
                 self._get_collection().update_one({'id': saved_repository.id}, {'$set': set_dictionary})
                 logging.debug(f'updating complete for Repository: [owner: {self.owner} name: {self.name}]')
@@ -259,6 +269,8 @@ class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
                       login
                     }
                     name
+                    forkCount
+                    isFork
                    pullRequests (first: 1) { 
                      totalCount  
                    }      
@@ -266,6 +278,140 @@ class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
                }
                """
         return query
+
+    if __name__ == '__main__':
+        luigi.run()
+
+
+class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMixin):
+    """
+    Task for loading repositories from git's graphql interface based on a query
+    example query: language:cobol
+    """
+
+    query: str = luigi.Parameter()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def requires(self):
+        return []
+
+    def run(self):
+        """
+        loads the repository document (or updates its total count to a current value)
+        :return: None
+        """
+
+        repository_cursor: str = None
+
+        # continue executing gets against git until we have all the repositories
+        while self._get_actual_results() != self._get_expected_results():
+
+            logging.debug(f'running query for Repository: [query: {self.query}]')
+            search_query = self._search_query(repository_cursor)
+            response_json = self.graph_ql_client.execute_query(search_query)
+            logging.debug(f'query complete for Repository: [query: {self.query}]')
+
+            if response_json["data"]["search"] is not None:
+
+                for edge in response_json["data"]["search"]["edges"]:
+                    repository_cursor = edge["cursor"]
+
+                    owner_login = edge["node"]["owner"]["login"]
+                    name = edge["node"]["name"]
+
+                    saved_repository: Repository = self._get_repository_by_owner_and_name(owner_login, name)
+                    if saved_repository is None:
+                        repository: Repository = Repository()
+                        repository.id = edge["node"]["id"]
+                        repository.owner_login = owner_login
+                        repository.owner = self._find_actor_by_id(edge["node"]["owner"]["id"])
+                        repository.name = name
+                        repository.is_fork = edge["node"]["isFork"]
+                        repository.fork_count = edge["node"]["forkCount"]
+                        repository.total_pull_requests = edge["node"]["pullRequests"]["totalCount"]
+
+                        logging.debug(f'inserting record for {repository}')
+                        self._get_collection().insert_one(repository.to_dictionary())
+                        logging.debug(f'insert complete for {repository}')
+
+                    else:
+                        total_pull_requests = edge["node"]["pullRequests"]["totalCount"]
+                        fork_count = edge["node"]["forkCount"]
+                        update_timestamp = datetime.now()
+                        set_dictionary = {'total_pull_requests': total_pull_requests, 'fork_count': fork_count,
+                                          'update_timestamp': update_timestamp}
+                        logging.debug(f'updating record for Repository: [owner: {owner_login} name: {name}]')
+                        self._get_collection().update_one({'id': saved_repository.id}, {'$set': set_dictionary})
+                        logging.debug(f'updating complete for Repository: [owner: {owner_login} name: {name}]')
+
+    def _get_expected_results(self):
+        """
+        return the count of repositories expected, based on queries
+        :return:
+        """
+        logging.debug(
+            f'running count of expected repositories for Repository: [owner: {self.query}]'
+        )
+        search_query = self._search_query()
+        response_json = self.graph_ql_client.execute_query(search_query)
+        logging.debug(
+            f'count of expected repositories for Repository: [owner: {self.query}]'
+        )
+
+        if response_json["data"]["search"] is not None:
+            return response_json["data"]["search"]["repositoryCount"]
+        else:
+            return 0
+
+    def _get_actual_results(self):
+        """
+        return the current count of pull requests stored
+        :return: True if the repo exists
+        """
+        logging.debug(f'running a query for the repositories currently saved in database')
+        count = self._get_collection().count_documents({'object_type': 'REPOSITORY'})
+        logging.debug(f'query for the repositories currently saved in database complete')
+        return count
+
+    def _search_query(self, repository_cursor: str=None) -> str:
+        """
+        creates a graphql query for the repositories based on a query - asks for 100 repos a time
+        :param repository_cursor: the cursor that indicates where to records were loaded until
+        :return: the query string
+        """
+
+        after = ''
+        if repository_cursor:
+            after = 'after:"' + repository_cursor + '"'
+
+        search_query = """
+                {
+                  search(query: \"""" + self.query + """\", type: REPOSITORY, first: 100, """ + after + """) {
+                    repositoryCount
+                    edges {
+                      cursor
+                      node {
+                        ... on Repository {
+                          id
+                          owner {
+                            id
+                            login
+                          }
+                          name
+                          forkCount
+                          isFork
+                          pullRequests(first: 1) {
+                            totalCount
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+               """
+        return search_query
 
     if __name__ == '__main__':
         luigi.run()

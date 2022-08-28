@@ -51,7 +51,9 @@ class CaseSetup:
             complete_string = f'{complete_tasks} complete ones were encountered'
             result = result and complete_string in luigi_result.summary_text
 
-        result = result and 'no failed tasks or missing dependencies' in luigi_result.summary_text
+        result = result and ('no failed tasks or missing dependencies' in luigi_result.summary_text or
+                             'because there were failed tasks but they all succeeded in a retry' in
+                             luigi_result.summary_text)
 
         return result
 

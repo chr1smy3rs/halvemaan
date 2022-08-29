@@ -319,9 +319,9 @@ class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMi
             if response_json["data"]["search"] is not None:
 
                 has_next_page = response_json["data"]["search"]["pageInfo"]["hasNextPage"]
+                repository_cursor = response_json["data"]["search"]["pageInfo"]["endCursor"]
 
                 for edge in response_json["data"]["search"]["edges"]:
-                    repository_cursor = edge["cursor"]
 
                     owner_login = edge["node"]["owner"]["login"]
                     name = edge["node"]["name"]
@@ -397,9 +397,9 @@ class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMi
                     repositoryCount
                     pageInfo {
                       hasNextPage
+                      endCursor
                     }
                     edges { 
-                      cursor
                       node {
                         ... on Repository {
                           id
@@ -408,8 +408,26 @@ class LoadRepositoriesByQueryTask(GitRepositoryBasedTask, actor.GitActorLookupMi
                             login
                           }
                           name
-                          forkCount
+                          description
+                          createdAt
+                          pushedAt
+                          updatedAt
+                          url
+                          sshUrl
+                          isArchived
+                          isDisabled
+                          isEmpty
                           isFork
+                          isLocked
+                          isMirror
+                          isPrivate
+                          isUserConfigurationRepository
+                          isTemplate
+                          forkCount
+                          primaryLanguage {
+                            id
+                            name
+                          }
                           pullRequests(first: 1) {
                             totalCount
                           }

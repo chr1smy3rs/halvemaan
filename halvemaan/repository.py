@@ -269,8 +269,26 @@ class LoadRepositoryTask(GitSingleRepositoryTask, actor.GitActorLookupMixin):
                       login
                     }
                     name
-                    forkCount
+                    description
+                    createdAt
+                    pushedAt
+                    updatedAt
+                    url
+                    sshUrl
+                    isArchived
+                    isDisabled
+                    isEmpty
                     isFork
+                    isLocked
+                    isMirror
+                    isPrivate
+                    isUserConfigurationRepository
+                    isTemplate
+                    forkCount
+                    primaryLanguage {
+                      id
+                      name
+                    }
                    pullRequests (first: 1) { 
                      totalCount  
                    }      

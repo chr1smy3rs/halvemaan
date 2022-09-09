@@ -25,6 +25,38 @@ from halvemaan import base, actor
 luigi.auto_namespace(scope=__name__)
 
 
+class ProgrammingLanguage:
+    """contains the data for a programming language"""
+
+    def __init__(self):
+        self.id: str = None
+        self.name: str = None
+
+    def __str__(self) -> str:
+        """
+        returns a string identifying the language
+        :return: a string representation of the language
+        """
+        return f'ProgrammingLanguage [name: {self.name}]'
+
+    def to_dictionary(self) -> {}:
+        """
+        returns all of the pertinent data as a dictionary
+        :return: all of the pertinent data as a dictionary
+        """
+        return {
+            'id': self.id,
+            'name': self.name
+        }
+
+    @staticmethod
+    def parse_dictionary(json):
+        language: ProgrammingLanguage = ProgrammingLanguage()
+        language.id = json['id']
+        language.name = json['name']
+        return language
+
+
 class Repository:
     """ contains the data for a git repository """
 
@@ -43,6 +75,26 @@ class Repository:
         self.insert_datetime: datetime = datetime.now()
         self.update_datetime: datetime = datetime.now()
         self.object_type: base.ObjectType = base.ObjectType.REPOSITORY
+
+        """description
+                    createdAt
+                    pushedAt
+                    updatedAt
+                    url
+                    sshUrl
+                    isArchived
+                    isDisabled
+                    isEmpty
+                    isFork
+                    isLocked
+                    isMirror
+                    isPrivate
+                    isUserConfigurationRepository
+                    isTemplate
+                    primaryLanguage {
+                      id
+                      name
+                    }"""
 
     def __str__(self) -> str:
         """
